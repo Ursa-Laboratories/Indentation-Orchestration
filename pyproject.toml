@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "polymer-indent"
+version = "0.1.0"
+description = "Main controller + station workers for the PEGDA UV-cure / indentation workcell"
+requires-python = ">=3.10"
+# Controller-only deps. The station worker needs the [station] extra.
+dependencies = [
+    "pyyaml",
+    "requests",
+]
+
+[project.optional-dependencies]
+# Install on each station Pi:  pip install -e ".[station]"
+# (cubos is already present on the Pis via the ASMI_new / cubos checkouts; the
+# entry below makes a clean-machine install work too.)
+station = [
+    "flask",
+    "cubos @ git+https://github.com/ursa-laboratories/CubOS.git@staging",
+]
+dev = [
+    "pytest",
+]
+
+[project.scripts]
+polymer-indent = "polymer_indent.cli:main"
+
+[tool.setuptools]
+packages = ["polymer_indent", "polymer_indent.clients", "station_worker"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

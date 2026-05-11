@@ -1,0 +1,21 @@
+# systemd unit for the ASMI station worker.
+# Install: copy to /etc/systemd/system/, edit User/paths, then:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now polymer-indent-asmi-station
+[Unit]
+Description=polymer_indent ASMI CubOS station worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=asmi
+WorkingDirectory=/home/asmi/polymer_indent
+ExecStart=/home/asmi/polymer_indent/.venv/bin/python -m station_worker --config configs/stations/asmi.yaml
+Restart=on-failure
+RestartSec=5
+# GRBL / Vernier GoDirect serial / USB
+SupplementaryGroups=dialout plugdev
+
+[Install]
+WantedBy=multi-user.target

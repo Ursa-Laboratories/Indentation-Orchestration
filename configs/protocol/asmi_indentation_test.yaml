@@ -1,0 +1,38 @@
+# ASMI single-well indentation test.
+#
+# CubOS deck-origin +Z-up. Heights on `measure`/`scan` are
+# *labware-relative* offsets above the well's calibrated surface Z
+# (signed: + above, - below).
+#
+# Uses cubos `measure` (single-position dispatch) rather than `scan` so
+# we don't iterate the plate. Pick the well via `position: plate.<well>`.
+# `measure` accepts `indentation_limit_height` and forwards it to
+# closed-loop methods like ASMI's `indentation` so a single-well
+# indentation works without a 1-well plate.
+#
+# Protocol flow: home → measure one well → park → home
+
+positions:
+  park_position: [0.0, 0.0, 80.0]
+
+protocol:
+  - home:
+
+  - measure:
+      instrument: asmi
+      position: plate.E5            # arbitrary well; change if testing elsewhere
+      method: indentation
+      measurement_height: 2.0       # 2 mm above the well rim
+      indentation_limit_height: -5.0  # 5 mm into the well at deepest descent
+      method_kwargs:
+        step_size: 0.01
+        force_limit: 10.0
+        baseline_samples: 10
+        measure_with_return: false
+
+  - move:
+      instrument: asmi
+      position: park_position
+      travel_z: 80.0
+
+  - home:

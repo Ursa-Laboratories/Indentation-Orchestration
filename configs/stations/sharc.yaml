@@ -1,0 +1,34 @@
+# SHARC / UV-cure station worker config.
+# Lives on the SHARC Pi (10.210.29.12). Used by:  python -m station_worker --config configs/stations/sharc.yaml
+#
+# The gantry / deck / protocol YAMLs are NOT listed here — the controller
+# sends all three in every /run-protocol request (gantry+deck frozen, protocol
+# = base with the well id swapped). This file only carries server settings and
+# the safety allow-list.
+
+station_id: sharc
+host: 0.0.0.0
+port: 8000
+
+# Where received protocol/result artifacts get written, one dir per run_id.
+run_dir: ~/polymer_indent_runs
+
+execution:
+  # Default mock_mode when a request omits it. Real runs connect + home the
+  # GRBL gantry and connect instruments before protocol.run(); mock skips all
+  # hardware (cubos setup_protocol(gantry=None, mock_mode=True)).
+  mock_mode: false
+  # requests' read timeout the controller should use is derived from this.
+  max_runtime_s: 900
+
+# Pre-flight guard: a received protocol may only reference these instruments
+# and these command verbs. Anything else is rejected before setup_protocol().
+allow:
+  instruments: [uv_curing]
+  commands: [home, measure, move]
+
+# Optional defense-in-depth: if set, the worker rejects a request whose
+# gantry_config / deck_config bytes don't match these sha256 digests. Leave
+# null to accept whatever the controller sends.
+expected_gantry_sha256: null
+expected_deck_sha256: null

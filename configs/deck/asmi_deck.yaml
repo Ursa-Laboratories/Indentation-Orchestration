@@ -1,0 +1,25 @@
+# ASMI deck configuration — SBS/ANSI 96-well plate for indentation.
+# Deck-origin +Z-up: z=0 at deck bottom, +X right, +Y back, +Z up.
+#
+# `load_name: sbs_96_wellplate` pulls rows/columns/footprint/9 mm pitch from
+# cubos/src/deck/labware/definitions/sbs_96_wellplate/SBS96WellPlate.yaml.
+# Only the per-deck calibration anchors live here.
+#
+# Calibration anchors:
+#   a1 = column 1, row A well center, in deck-frame coordinates (mm).
+#   a2 = adjacent well used to define column/row direction. With a2 at
+#        a1.x + 9 mm, columns increase in +X; rows then decrease in +Y.
+#
+# To re-measure: jog to each well center with
+#   PYTHONPATH=src python setup/calibrate_deck_origin.py \
+#     --gantry /path/to/ASMI_new/configs/gantry/asmi_gantry.yaml \
+#     --instrument asmi
+# Press Q to abort once you've copied the WPos readouts (no origin commit).
+# Z should land on the well-rim height in the calibrated deck frame.
+
+labware:
+  plate:
+    load_name: sbs_96_wellplate
+    calibration:
+      a1: { x: 348.5, y: 47.5, z: 19.9 }   # TODO: re-measure in deck frame
+      a2: { x: 339.5, y: 47.5, z: 19.9 }   # TODO: re-measure in deck frame

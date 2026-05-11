@@ -1,0 +1,22 @@
+# systemd unit for the SHARC / UV-cure station worker.
+# Install: copy to /etc/systemd/system/, edit User/paths, then:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now polymer-indent-sharc-station
+[Unit]
+Description=polymer_indent SHARC/UV CubOS station worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sartorius-scale
+WorkingDirectory=/home/sartorius-scale/polymer_indent
+# venv with `pip install -e ".[station]"` already done
+ExecStart=/home/sartorius-scale/polymer_indent/.venv/bin/python -m station_worker --config configs/stations/sharc.yaml
+Restart=on-failure
+RestartSec=5
+# GRBL / instrument serial ports
+SupplementaryGroups=dialout
+
+[Install]
+WantedBy=multi-user.target

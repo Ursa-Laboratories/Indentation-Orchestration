@@ -1,0 +1,22 @@
+# ASMI station worker config.
+# Lives on the ASMI Pi (10.210.29.17). Used by:  python -m station_worker --config configs/stations/asmi.yaml
+#
+# Same deal as configs/stations/sharc.yaml — the gantry/deck/protocol YAMLs
+# come in each /run-protocol request; this file is server settings + allow-list.
+
+station_id: asmi
+host: 0.0.0.0
+port: 8000
+
+run_dir: ~/polymer_indent_runs
+
+execution:
+  mock_mode: false
+  max_runtime_s: 900
+
+allow:
+  instruments: [asmi]
+  commands: [home, measure, move]
+
+expected_gantry_sha256: null
+expected_deck_sha256: null

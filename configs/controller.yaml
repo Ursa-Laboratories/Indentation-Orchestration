@@ -1,0 +1,53 @@
+# polymer_indent main-controller config.
+#
+# Runs on the Keeper box: bear-den-keeper, 10.210.29.11 (win10), user "Kab Lab".
+# The controller has no cubos dependency; it reads the frozen YAMLs below, swaps
+# the well id into the base protocol, POSTs {gantry_config, deck_config,
+# protocol_yaml} to each station Pi, and drives the arm + Opentrons.
+#
+# bear-den device map (relevant rows):
+#   bear-den-keeper   10.210.29.11   win10   user "Kab Lab"        — this controller (and the arm worker)
+#   bear-den-scale    10.210.29.12   debian  user sartorius-scale  — UV-curing station ("sharc")
+#   bear-den-asmi     10.210.29.17   debian  user asmi             — ASMI station
+#   bear-den-arm1     10.210.29.16          (Ufactory xArm)        — arm hardware
+#   bear-den-vention  10.210.29.15          (Vention rail)         — rail hardware (driven by the arm worker)
+#   Opentrons Flex    10.210.29.218         (00:14:2D:EC:99:70)    — liquid handler (placeholder client only)
+#   bear-den-panda    10.210.29.13   debian  user panda            — (not used here)
+
+stations:
+  sharc:                                                  # UV-curing station = bear-den-scale
+    base_url: "http://10.210.29.12:8000"
+    gantry_config: configs/gantry/sharc_gantry.yaml        # verbatim cubos@staging cub_sharc.yaml
+    deck_config:   configs/deck/sharc_deck.yaml            # verbatim cubos@staging sharc_uv_deck.yaml
+    base_protocol: configs/protocol/sharc_uv_one_well.yaml # well id rewritten per iteration
+    timeout_s: 900
+
+  asmi:                                                   # ASMI station = bear-den-asmi
+    base_url: "http://10.210.29.17:8000"
+    gantry_config: configs/gantry/asmi_gantry.yaml         # verbatim ASMI_new asmi_gantry.yaml
+    deck_config:   configs/deck/asmi_deck.yaml             # verbatim ASMI_new asmi_deck.yaml
+    base_protocol: configs/protocol/asmi_indentation_test.yaml  # verbatim ASMI_new; well id rewritten per iteration
+    timeout_s: 900
+
+arm:
+  # xArm (bear-den-arm1, 10.210.29.16) + Vention rail (bear-den-vention, 10.210.29.15).
+  # The arm-transfer HTTP worker is the existing denos `arm_worker.py` (out of
+  # scope here). In denos it runs on keeper_pc (-> "http://localhost:5004"); the
+  # design-doc loop addresses it at the arm's own IP. Set whichever is right for
+  # your deployment.
+  base_url: "http://10.210.29.16:5004"
+  timeout_s: 300
+
+opentrons:
+  # Opentrons Flex at 10.210.29.218. Placeholder client — does not talk to the
+  # Flex yet. base_url kept for when the real integration lands (denos ran an
+  # Opentrons HTTP shim on keeper_pc at :5003 that drives the Flex REST API on
+  # :31950).
+  base_url: "http://10.210.29.218:5003"
+  timeout_s: 600
+
+results:
+  db_path: results/polymer_indent.db          # relative to repo root unless absolute
+
+# Whether the run is a dry run by default (controller --mock overrides per invocation).
+mock_mode: false

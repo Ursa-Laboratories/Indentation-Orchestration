@@ -1,0 +1,43 @@
+# ASMI indentation protocol — full-plate scan.
+#
+# CubOS deck-origin +Z-up. Heights are *labware-relative* offsets above
+# the well's calibrated surface Z (signed: + above, - below); inter-labware
+# travel and the entry approach to the first well use the gantry's `safe_z`.
+#
+# All three height fields live on the `scan` command:
+#   - measurement_height        — the action plane offset (where the indenter
+#                                 starts the indent).
+#   - interwell_scan_height     — between-wells XY-travel offset; must be
+#                                 at or above measurement_height.
+#   - indentation_limit_height  — the deepest descent plane offset; must be
+#                                 at or below measurement_height. Negative
+#                                 means below the well surface (the usual
+#                                 case for indentation).
+#
+# Protocol flow: home → scan all wells → park → home
+
+positions:
+  park_position: [0.0, 0.0, 80.0]
+
+protocol:
+  - home:
+
+  - scan:
+      plate: plate
+      instrument: asmi
+      method: indentation
+      measurement_height: 2.0          # 2 mm above the well rim
+      interwell_scan_height: 3.0       # 3 mm above the well rim for between-wells travel
+      indentation_limit_height: -10.0  # 10 mm into the well at deepest descent
+      method_kwargs:
+        step_size: 0.01
+        force_limit: 10.0
+        baseline_samples: 10
+        measure_with_return: false
+
+  - move:
+      instrument: asmi
+      position: park_position
+      travel_z: 80.0
+
+  - home:

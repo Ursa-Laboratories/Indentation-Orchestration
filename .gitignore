@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+# local result DBs and station run dirs
+results/
+*.db
+*.sqlite
+polymer_indent_runs/
+runs/
+.DS_Store

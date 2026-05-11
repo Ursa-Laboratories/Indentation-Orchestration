@@ -1,0 +1,30 @@
+# Example experiment: PEGDA concentration x UV-dose screen on one plate.
+#
+# Per-well params are `defaults` merged with the well's own dict. In this first
+# version only the *well id* is swapped into the frozen base protocols
+# (configs/protocol/sharc_uv_one_well.yaml, configs/protocol/asmi_indentation_test.yaml);
+# the other params are recorded with the results for bookkeeping. Wire per-well
+# protocol overrides later by editing render_protocol / the base files.
+
+experiment:
+  id: pegda_screen_001
+
+  defaults:
+    volume_ul: 350
+    # UV (SHARC) — currently fixed by the base protocol; recorded here too.
+    uv_intensity: 20
+    uv_time: 300
+    # ASMI indentation — currently fixed by the base protocol; recorded here too.
+    asmi_step_size: 0.01
+    force_limit: 10.0
+    baseline_samples: 10
+
+  wells:
+    A1: { formulation: pegda_5 }
+    A2: { formulation: pegda_10 }
+    A3: { formulation: pegda_15, uv_intensity: 40, uv_time: 600 }
+    A4: { formulation: pegda_10, uv_intensity: 40 }
+
+# Where the last well's plate goes after its ASMI step (non-final wells return
+# to "opentrons"). One of: opentrons, uv_station, asmi, storage_end, storage_start.
+final_well_return_location: storage_end

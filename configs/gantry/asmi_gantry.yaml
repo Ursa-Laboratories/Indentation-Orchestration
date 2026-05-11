@@ -1,0 +1,45 @@
+# ASMI gantry configuration.
+# Genmitsu 3018 PRO with ASMI indenter mounted.
+# CubOS deck-origin +Z-up: z=0 at deck bottom, z grows toward home.
+
+serial_port: /dev/ttyUSB0
+gantry_type: cub_xl
+
+cnc:
+  homing_strategy: standard
+  total_z_range: 100.0
+  y_axis_motion: head
+  # Absolute deck-frame Z used for inter-labware travel and the entry
+  # approach to the first well of a scan.
+  safe_z: 80.0
+
+working_volume:
+  x_min: 0.0
+  x_max: 400.0
+  y_min: 0.0
+  y_max: 300.0
+  z_min: 0.0
+  z_max: 100.0
+
+grbl_settings:
+  homing_enable: true
+  steps_per_mm_x: 400.0
+  steps_per_mm_y: 400.0
+  steps_per_mm_z: 400.0
+  max_travel_x: 400.0
+  max_travel_y: 300.0
+  max_travel_z: 100.0
+
+instruments:
+  asmi:
+    type: asmi
+    vendor: vernier
+    offset_x: 0.0
+    offset_y: 0.0
+    depth: 0.0
+    # Labware-relative motion heights (`measurement_height`,
+    # `interwell_scan_height`, `indentation_limit_height`) live on the
+    # protocol scan/measure command, not here.
+    force_threshold: -50
+    sensor_channels:
+      - 1
