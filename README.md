@@ -81,9 +81,32 @@ station_worker/                    the Flask worker run on each Pi (imports cubo
   app.py  worker.py  config.py  runs.py  allow.py  jsonify.py  __main__.py
 deploy/                            systemd units + install_station.sh
 examples/pegda_screen.yaml         sample experiment
+scripts/test_asmi.py  test_uv.py   per-station test runners (run one full protocol on one station)
 main.py                            controller entrypoint
 tests/                             pytest suite
 ```
+
+## Test one station at a time
+
+Standalone runners — point them at a station and run a single full protocol on a
+chosen well (use `--mock` first):
+
+```bash
+python scripts/test_asmi.py --well E5 --mock              # dry run on the ASMI Pi
+python scripts/test_asmi.py --well E5                     # real run (prompts first)
+python scripts/test_asmi.py --well B3 --force-limit 5 --indentation-limit-height -3
+python scripts/test_asmi.py --validate-only --well E5     # just /validate-protocol
+
+python scripts/test_uv.py --well A1 --mock                # dry run on the SHARC/UV Pi
+python scripts/test_uv.py --well A1                        # real run (prompts first)
+python scripts/test_uv.py --well C7 --intensity 20 --exposure-time 300
+```
+
+By default they read the station's `base_url` and the gantry/deck/base-protocol
+paths from `configs/controller.yaml`; override with `--url`, `--gantry`, `--deck`,
+`--protocol`. `python scripts/test_asmi.py --help` lists every knob. (Pointing
+`--protocol` at a scan file runs the whole plate, but the station's `allow`-list
+must then include the `scan` command.)
 
 ## Install
 
