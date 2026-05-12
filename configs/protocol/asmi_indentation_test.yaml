@@ -1,38 +1,31 @@
-# ASMI single-well indentation test.
+# ASMI single-well indentation test (CubOS entrypoint format).
 #
-# CubOS deck-origin +Z-up. Heights on `measure`/`scan` are
-# *labware-relative* offsets above the well's calibrated surface Z
-# (signed: + above, - below).
+# CubOS deck-origin +Z-up. Heights on `measure` are *labware-relative* offsets
+# above the well's calibrated surface Z (signed: + above, - below). The well id
+# in `position:` is what the controller swaps per iteration.
 #
-# Uses cubos `measure` (single-position dispatch) rather than `scan` so
-# we don't iterate the plate. Pick the well via `position: plate.<well>`.
-# `measure` accepts `indentation_limit_height` and forwards it to
-# closed-loop methods like ASMI's `indentation` so a single-well
-# indentation works without a 1-well plate.
+# `indentation_limit_height` is set *close to* `measurement_height`, so the
+# indenter only descends a tiny bit and stays above the well surface — a
+# low-risk "does the motion + force sensor work?" run, not a real indent.
+# For a real indent, drop it to a negative value (e.g. -5.0 = 5 mm into the
+# well). cubos requires indentation_limit_height ≤ measurement_height.
 #
-# Protocol flow: home → measure one well → park → home
-
-positions:
-  park_position: [0.0, 0.0, 80.0]
+# Flow: home → measure one well → home  (the final `home` retracts Z then parks
+# at the homing corner — no literal park XY to risk the soft limits).
 
 protocol:
   - home:
 
   - measure:
       instrument: asmi
-      position: plate.E5            # arbitrary well; change if testing elsewhere
+      position: plate.E5            # well; the controller rewrites this per iteration
       method: indentation
-      measurement_height: 2.0       # 2 mm above the well rim
-      indentation_limit_height: -5.0  # 5 mm into the well at deepest descent
+      measurement_height: 2.0       # 2 mm above the well rim (labware-relative)
+      indentation_limit_height: 1.5 # close to measurement_height — only ~0.5 mm of descent; stays above the surface
       method_kwargs:
         step_size: 0.01
         force_limit: 10.0
         baseline_samples: 10
         measure_with_return: false
-
-  - move:
-      instrument: asmi
-      position: park_position
-      travel_z: 80.0
 
   - home:

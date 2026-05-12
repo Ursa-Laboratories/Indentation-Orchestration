@@ -17,7 +17,9 @@
 # Protocol flow: home → scan all wells → park → home
 
 positions:
-  park_position: [0.0, 0.0, 80.0]
+  # (x_max - 5, y_max - 5, safe_z) for configs/gantry/asmi_gantry.yaml — 5 mm
+  # inside the back-right (homing) corner, clear of the soft limits.
+  park_position: [395.0, 279.0, 80.0]
 
 protocol:
   - home:

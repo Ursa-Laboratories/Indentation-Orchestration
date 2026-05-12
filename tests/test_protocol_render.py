@@ -9,15 +9,11 @@ from polymer_indent.protocol_render import render_protocol
 def test_swaps_well_in_asmi_base(asmi_base_protocol):
     out = render_protocol(asmi_base_protocol, "B7")
     doc = yaml.safe_load(out)
-    positions = [
-        step["measure"]["position"]
-        for step in doc["protocol"]
-        if isinstance(step.get("measure"), dict) and "position" in step["measure"]
-    ]
-    assert positions == ["plate.B7"]
-    # other content untouched
-    assert "park_position" in doc["positions"]
-    assert any("indentation" == step.get("measure", {}).get("method") for step in doc["protocol"])
+    assert [next(iter(s)) for s in doc["protocol"]] == ["home", "measure", "home"]
+    measure = doc["protocol"][1]["measure"]
+    assert measure["position"] == "plate.B7"
+    assert measure["method"] == "indentation"
+    assert "plate.E5" not in out
 
 
 def test_swaps_well_in_sharc_base(sharc_base_protocol):
