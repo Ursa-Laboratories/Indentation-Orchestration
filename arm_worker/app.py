@@ -174,8 +174,14 @@ def create_app(*, mock_mode_default: bool = False, arm_ip: str = P.ARM_IP,
 
     def pick_from_uv(arm, rail):
         log.info("pick_from_uv")
+        # NOTE: deviates from denos's pick_from_uv — denos moved the arm to
+        # ARM_SAFE_POSITION first, then the rail, then the UV pickup. Per request,
+        # the first arm command here goes straight to UV_PICKUP_LIFTED (no SAFE
+        # waypoint), to avoid a swing through [0,150,200] that crashed. Caveat:
+        # the rail now moves with the arm in whatever pose it's in, and the arm
+        # plans its own path from there to UV_PICKUP_LIFTED — jog the arm clear in
+        # xArm Studio before running this if it's parked somewhere awkward.
         arm._arm.open_lite6_gripper(); _grip_settle(arm)
-        _move(arm, P.ARM_SAFE_POSITION, speed=100)
         _rail_move(rail, P.UV_RAIL_POSITION_MM)
         _move(arm, P.UV_PICKUP_LIFTED)
         _move(arm, P.UV_PICKUP_POSITION)
