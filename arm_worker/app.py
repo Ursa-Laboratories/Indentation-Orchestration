@@ -300,15 +300,12 @@ def create_app(*, mock_mode_default: bool = False, arm_ip: str = P.ARM_IP,
                     if arm.get_state()[1] == 2:
                         break
             _check_stop()
-            # Always retract the arm to ARM_SAFE_POSITION FIRST, then home the
-            # rail — so a homing carriage move never drags an extended arm into
-            # anything. (Assumes the arm can reach SAFE from where it is; if it's
-            # parked somewhere extended/post-fault, jog it clear in xArm Studio
-            # before running.)
+            # Retract the arm to ARM_SAFE_POSITION before any carriage move (the
+            # route's first step moves the rail). No rail home — the route's
+            # `_rail_move` drives the carriage straight to the station position.
+            # (Assumes the arm can reach SAFE from where it is; if it's parked
+            # extended/post-fault, jog it clear in xArm Studio before running.)
             _move(arm, P.ARM_SAFE_POSITION, speed=P.ARM_SPEED)
-            log.info("homing rail...")
-            rail.actuator.home()
-            rail.actuator.wait_for_move_completion(timeout=60)
             _check_stop()
             route_fn(arm, rail)
             _check_stop()
