@@ -49,14 +49,19 @@ stations:
       station_config: configs/stations/asmi.yaml
 
 arm:
-  # xArm (bear-den-arm1, 10.210.29.16) + Vention rail (bear-den-vention, 10.210.29.15).
-  # The arm-transfer HTTP worker (arm_worker/, extracted from denos) runs on the
-  # controller box (bear-den-keeper). In denos it ran on keeper too; the
-  # design-doc loop addresses it at the arm's own IP — use whichever fits.
-  base_url: "http://10.210.29.16:5004"
+  # xArm hardware = bear-den-arm1 (10.210.29.16); Vention rail = bear-den-vention
+  # (10.210.29.15). The arm-transfer HTTP worker (arm_worker/, extracted from
+  # denos) runs ON the controller box and talks to that hardware — so base_url is
+  # localhost, not the arm's IP. (denos ran its arm worker on keeper too.)
+  base_url: "http://localhost:5004"
   timeout_s: 300
-  local:                                                   # for `polymer-indent workers ... arm` (launched here, on the controller)
-    # command: ["python", "-m", "arm_worker", "--port", "5004"]   # default; uncomment + edit to add e.g. --mock
+  local:                                                   # `polymer-indent workers ... arm` launches it here
+    # Needs Python 3.10 (machine-logic-sdk) + the keeper_pc repo on PYTHONPATH
+    # (device_drivers.vention_railway). Edit the python path / PYTHONPATH to match
+    # your machine; add --mock to the command for a dry run.
+    command: ["/opt/homebrew/Caskroom/miniforge/base/envs/armworker/bin/python", "-m", "arm_worker", "--port", "5004"]
+    env:
+      PYTHONPATH: /Users/charl/Programming/panda/keeper_pc
     log: arm_worker.log                                    # written under <repo>/.run/
 
 opentrons:

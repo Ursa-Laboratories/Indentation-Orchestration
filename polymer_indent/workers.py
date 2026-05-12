@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 import subprocess
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
 from urllib.parse import urlparse
@@ -119,6 +119,7 @@ class LocalWorker:
     command: List[str]                  # e.g. [sys.executable, "-m", "arm_worker", "--port", "5004"]
     log_path: Path
     pid_path: Path
+    env: dict = field(default_factory=dict)   # extra env vars (e.g. PYTHONPATH) merged over os.environ
 
     def is_up(self) -> bool:
         return _health(self.base_url) is not None
@@ -134,9 +135,10 @@ class LocalWorker:
             return "already running"
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         logf = open(self.log_path, "ab")
+        child_env = {**os.environ, **{k: str(v) for k, v in (self.env or {}).items()}}
         proc = subprocess.Popen(
             self.command, stdout=logf, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-            start_new_session=True, cwd=str(_RUN_DIR.parent),
+            start_new_session=True, cwd=str(_RUN_DIR.parent), env=child_env,
         )
         self.pid_path.write_text(str(proc.pid))
         if wait and not _wait_health(self.base_url, want_up=True, timeout=15.0):
@@ -205,6 +207,7 @@ def workers_from_config(cfg, names: Optional[List[str]] = None) -> "list":
                 name="arm", base_url=arm["base_url"], command=list(command),
                 log_path=_RUN_DIR / (local.get("log") or "arm_worker.log"),
                 pid_path=_RUN_DIR / "arm_worker.pid",
+                env=dict(local.get("env") or {}),
             ))
     return out
 
