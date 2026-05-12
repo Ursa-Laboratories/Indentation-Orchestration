@@ -117,11 +117,8 @@ def create_app(*, mock_mode_default: bool = False, arm_ip: str = P.ARM_IP,
             arm.set_mode(0)
             arm.set_state(0)
             time.sleep(0.5)
-            rail = VentionRailway(ip=rail_ip)
-            log.info("homing rail...")
-            rail.actuator.home()
-            rail.actuator.wait_for_move_completion(timeout=60)
-            state["arm"], state["rail"] = arm, rail
+            rail = VentionRailway(ip=rail_ip)   # connect only — DON'T home the rail here;
+            state["arm"], state["rail"] = arm, rail   # the /run handler homes it AFTER retracting the arm
         state["hardware_is_mock"] = mock
         return state["arm"], state["rail"]
 
@@ -174,13 +171,10 @@ def create_app(*, mock_mode_default: bool = False, arm_ip: str = P.ARM_IP,
 
     def pick_from_uv(arm, rail):
         log.info("pick_from_uv")
-        # NOTE: deviates from denos's pick_from_uv — denos moved the arm to
-        # ARM_SAFE_POSITION first, then the rail, then the UV pickup. Per request,
-        # the first arm command here goes straight to UV_PICKUP_LIFTED (no SAFE
-        # waypoint), to avoid a swing through [0,150,200] that crashed. Caveat:
-        # the rail now moves with the arm in whatever pose it's in, and the arm
-        # plans its own path from there to UV_PICKUP_LIFTED — jog the arm clear in
-        # xArm Studio before running this if it's parked somewhere awkward.
+        # The /run handler already retracted the arm to ARM_SAFE_POSITION and
+        # homed the rail before calling this, so we go straight to the UV pickup
+        # (no extra SAFE waypoint — denos's version had one here, but it's
+        # redundant after the handler's prelude).
         arm._arm.open_lite6_gripper(); _grip_settle(arm)
         _rail_move(rail, P.UV_RAIL_POSITION_MM)
         _move(arm, P.UV_PICKUP_LIFTED)
@@ -305,6 +299,16 @@ def create_app(*, mock_mode_default: bool = False, arm_ip: str = P.ARM_IP,
                     time.sleep(0.5)
                     if arm.get_state()[1] == 2:
                         break
+            _check_stop()
+            # Always retract the arm to ARM_SAFE_POSITION FIRST, then home the
+            # rail — so a homing carriage move never drags an extended arm into
+            # anything. (Assumes the arm can reach SAFE from where it is; if it's
+            # parked somewhere extended/post-fault, jog it clear in xArm Studio
+            # before running.)
+            _move(arm, P.ARM_SAFE_POSITION, speed=P.ARM_SPEED)
+            log.info("homing rail...")
+            rail.actuator.home()
+            rail.actuator.wait_for_move_completion(timeout=60)
             _check_stop()
             route_fn(arm, rail)
             _check_stop()
