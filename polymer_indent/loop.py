@@ -44,6 +44,7 @@ def run_experiment(
     asmi: StationBundle,
     results: ResultStore,
     mock_mode: bool = False,
+    mock_modes: Optional[dict] = None,
     resume: bool = False,
     only_wells: Optional[Sequence[str]] = None,
     continue_on_error: bool = False,
@@ -51,11 +52,21 @@ def run_experiment(
     """Run the experiment. Returns the number of wells that failed.
 
     Args:
+        mock_mode: default for every device when not in ``mock_modes``.
+        mock_modes: per-device overrides, keys ``"sharc"``, ``"asmi"``, ``"arm"``
+            (e.g. ``{"asmi": True}`` runs SHARC + arm real, ASMI in mock).
         resume: skip wells already marked ``done`` in the result store.
         only_wells: if given, only run these wells (still in declared order).
         continue_on_error: keep going after a well fails (default: stop).
     """
     results.start_experiment(experiment)
+
+    overrides = mock_modes or {}
+    sharc_mock = bool(overrides.get("sharc", mock_mode))
+    asmi_mock  = bool(overrides.get("asmi",  mock_mode))
+    arm_mock   = bool(overrides.get("arm",   mock_mode))
+    log.info("run_experiment: mock_mode default=%s   per-device sharc=%s asmi=%s arm=%s",
+             mock_mode, sharc_mock, asmi_mock, arm_mock)
 
     wells = list(_select_wells(experiment, only_wells))
     already_done = results.done_wells(experiment.id) if resume else set()
@@ -80,7 +91,9 @@ def run_experiment(
                 sharc=sharc,
                 asmi=asmi,
                 results=results,
-                mock_mode=mock_mode,
+                sharc_mock=sharc_mock,
+                asmi_mock=asmi_mock,
+                arm_mock=arm_mock,
             )
             results.set_well_status(experiment.id, well, "done")
             log.info("well %s: done", well)
@@ -111,7 +124,9 @@ def _run_one_well(
     sharc: StationBundle,
     asmi: StationBundle,
     results: ResultStore,
-    mock_mode: bool,
+    sharc_mock: bool = False,
+    asmi_mock: bool = False,
+    arm_mock: bool = False,
 ) -> None:
     # 1. Opentrons fill (placeholder)
     fill = opentrons.run_fill(
@@ -128,7 +143,7 @@ def _run_one_well(
 
     # 2. arm: opentrons -> uv_station
     _transfer(arm, results, experiment_id, well, step_id, "move-to-sharc",
-              "opentrons", "uv_station", mock_mode=mock_mode)
+              "opentrons", "uv_station", mock_mode=arm_mock)
 
     # 3. SHARC UV cure
     sharc_run_id = f"{step_id}:sharc"
@@ -137,12 +152,12 @@ def _run_one_well(
         run_id=sharc_run_id,
         protocol_yaml=sharc_protocol_yaml,
         metadata={"experiment_id": experiment_id, "well": well, "step": "sharc"},
-        mock_mode=mock_mode,
+        mock_mode=sharc_mock,
     )
 
     # 4. arm: uv_station -> asmi
     _transfer(arm, results, experiment_id, well, step_id, "move-to-asmi",
-              "uv_station", "asmi", mock_mode=mock_mode)
+              "uv_station", "asmi", mock_mode=arm_mock)
 
     # 5. ASMI indentation
     asmi_run_id = f"{step_id}:asmi"
@@ -151,7 +166,7 @@ def _run_one_well(
         run_id=asmi_run_id,
         protocol_yaml=asmi_protocol_yaml,
         metadata={"experiment_id": experiment_id, "well": well, "step": "asmi"},
-        mock_mode=mock_mode,
+        mock_mode=asmi_mock,
     )
 
     # 6. bookkeeping
@@ -168,7 +183,7 @@ def _run_one_well(
 
     # 7. arm: asmi -> {storage_end | opentrons}
     _transfer(arm, results, experiment_id, well, step_id, "return",
-              "asmi", return_location, mock_mode=mock_mode)
+              "asmi", return_location, mock_mode=arm_mock)
 
 
 def _transfer(arm, results, experiment_id, well, step_id, tag, src, dst, *, mock_mode=False) -> None:

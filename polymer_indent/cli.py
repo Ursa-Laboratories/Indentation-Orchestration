@@ -45,7 +45,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_run = sub.add_parser("run", help="run an experiment end to end")
     p_run.add_argument("experiment", help="experiment YAML")
     _add_config_arg(p_run)
-    p_run.add_argument("--mock", action="store_true", help="dry run: stations skip all hardware")
+    p_run.add_argument("--mock", action="store_true", help="dry run: every device skips hardware (overridden per-device by the next 3 flags)")
+    p_run.add_argument("--mock-sharc", action="store_true", help="SHARC station skips hardware (cubos mock_mode); other devices unaffected")
+    p_run.add_argument("--mock-asmi", action="store_true", help="ASMI station skips hardware (cubos mock_mode); other devices unaffected")
+    p_run.add_argument("--mock-arm", action="store_true", help="arm worker uses logging-only stand-ins (no xArm/rail); other devices unaffected")
     p_run.add_argument("--resume", action="store_true", help="skip wells already marked done")
     p_run.add_argument("--only-well", default=None, help="comma-separated wells to run (in declared order)")
     p_run.add_argument("--db", default=None, help="override results DB path")
@@ -77,6 +80,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     arm = cfg.arm_client()
     opentrons = cfg.opentrons_client()
 
+    mock_modes: dict = {}
+    if args.mock_sharc: mock_modes["sharc"] = True
+    if args.mock_asmi:  mock_modes["asmi"]  = True
+    if args.mock_arm:   mock_modes["arm"]   = True
+
     with cfg.result_store(args.db) as results:
         failed = run_experiment(
             experiment,
@@ -86,6 +94,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             asmi=asmi,
             results=results,
             mock_mode=args.mock,
+            mock_modes=mock_modes,
             resume=args.resume,
             only_wells=only_wells,
             continue_on_error=args.continue_on_error,
