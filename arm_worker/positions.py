@@ -20,12 +20,12 @@ UV_PICKUP_POSITION = [253, 188, 99, 180, 0, 0]
 UV_PICKUP_LIFTED = [253, 188, 200, 180, 0, 0]
 UV_RAIL_POSITION_MM = 600
 
-# ASMI station (slide-in / slide-out tray) — re-measured 2026-05-12 (was [272/369, 60.5, ...])
-ASMI_SLIDE_IN_POSITION = [280.5, 35, 33.5, 180, 0, 90]
-ASMI_SLIDE_IN_LIFTED = [280.5, 35, 200, 180, 0, 90]
-ASMI_SLIDE_OUT_POSITION = [376, 35, 33.5, 180, 0, 90]
-ASMI_SLIDE_OUT_LIFTED = [376, 35, 200, 180, 0, 90]
-ASMI_SLIDE_IN_PUSH = [270.5, 35, 33.5, 180, 0, 90]   # TODO confirm — derived as SLIDE_IN_POSITION − 10 mm in x (seats the plate)
+# ASMI station (slide-in / slide-out tray) — y bumped 35 -> 37 on 2026-05-13
+ASMI_SLIDE_IN_POSITION = [280.5, 37, 33.5, 180, 0, 90]
+ASMI_SLIDE_IN_LIFTED = [280.5, 37, 200, 180, 0, 90]
+ASMI_SLIDE_OUT_POSITION = [376, 37, 33.5, 180, 0, 90]
+ASMI_SLIDE_OUT_LIFTED = [376, 37, 200, 180, 0, 90]
+ASMI_SLIDE_IN_PUSH = [270.5, 37, 33.5, 180, 0, 90]   # TODO confirm — derived as SLIDE_IN_POSITION − 10 mm in x (seats the plate)
 ASMI_RAIL_POSITION_MM = 1000
 
 # Opentrons deck slot D1 — two plate variants; pick one.
