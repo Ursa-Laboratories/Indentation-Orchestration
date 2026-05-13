@@ -12,9 +12,8 @@ Run from the controller box (the package must be installed or this repo on disk)
 Targets the SHARC / UV-curing station from configs/controller.yaml
 (bear-den-scale, :8000) with configs/gantry/sharc_gantry.yaml +
 configs/deck/sharc_deck.yaml + configs/protocol/sharc_uv_one_well.yaml (well id
-swapped in). NB: cub_sharc.yaml ships uv_curing with `offline: true` — a "real"
-run won't actually fire the lamp until that flag is cleared in the gantry YAML.
-See --help.
+swapped in). The local sharc_gantry.yaml has `offline:` stripped from `uv_curing`,
+so a real run will fire the OmniCure — use --mock for a dry run. See --help.
 """
 
 import os

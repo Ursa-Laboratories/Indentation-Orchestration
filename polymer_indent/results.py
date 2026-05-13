@@ -22,7 +22,7 @@ import json
 import sqlite3
 import time
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Iterable, Optional
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS experiments (
@@ -184,36 +184,6 @@ class ResultStore:
                     protocol_yaml, _dump(result), _dump(artifacts), error,
                 ),
             )
-
-    def store(
-        self,
-        *,
-        experiment_id: str,
-        well: str,
-        sharc: Dict[str, Any],
-        asmi: Dict[str, Any],
-        sharc_run_id: str,
-        asmi_run_id: str,
-        sharc_protocol_yaml: str,
-        asmi_protocol_yaml: str,
-    ) -> None:
-        """Record the SHARC + ASMI station runs for a well, in one shot.
-
-        Mirrors the design-doc ``results.store(...)`` call.
-        """
-        now = _now()
-        self.record_run(
-            run_id=sharc_run_id, experiment_id=experiment_id, well=well,
-            kind="sharc", station="sharc", success=bool(sharc.get("success", True)),
-            finished_at=now, protocol_yaml=sharc_protocol_yaml,
-            result=sharc.get("results", sharc), artifacts=sharc.get("artifacts"),
-        )
-        self.record_run(
-            run_id=asmi_run_id, experiment_id=experiment_id, well=well,
-            kind="asmi", station="asmi", success=bool(asmi.get("success", True)),
-            finished_at=now, protocol_yaml=asmi_protocol_yaml,
-            result=asmi.get("results", asmi), artifacts=asmi.get("artifacts"),
-        )
 
     # -- read-back -------------------------------------------------------
 

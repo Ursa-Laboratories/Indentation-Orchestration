@@ -36,8 +36,8 @@ def main(argv: list[str] | None = None) -> int:
         "station %s listening on %s:%d (run_dir=%s, mock_default=%s)",
         cfg.station_id, host, port, cfg.run_dir, cfg.mock_mode_default,
     )
-    # threaded=False keeps it strictly one-protocol-at-a-time at the WSGI layer
-    # too (the lock already enforces it, but no point queueing concurrent runs).
+    # threaded=True so /health, /stop, /runs/<id> still respond while a /run-protocol
+    # is in flight; the run_lock keeps cubos.protocol.run strictly one-at-a-time.
     app.run(host=host, port=port, threaded=True)
     return 0
 

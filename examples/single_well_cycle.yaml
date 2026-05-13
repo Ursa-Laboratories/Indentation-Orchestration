@@ -3,7 +3,7 @@
 #
 # Run with:
 #   python main.py run examples/single_well_cycle.yaml          # real
-#   python main.py run examples/single_well_cycle.yaml --mock   # stations skip hardware (arm still moves)
+#   python main.py run examples/single_well_cycle.yaml --mock   # every device skips hardware (use --mock-sharc / --mock-asmi / --mock-arm for per-device)
 #
 # Per-well params here are recorded with the results; only the well id is
 # swapped into the SHARC + ASMI base protocols (sharc_uv_one_well.yaml,

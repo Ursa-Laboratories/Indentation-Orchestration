@@ -31,19 +31,22 @@ def test_well_status_and_done_wells(tmp_path):
         assert store.done_wells("e1") == {"A1"}
 
 
-def test_store_records_two_station_runs(tmp_path):
+def test_record_run_persists_per_leg(tmp_path):
+    """The loop calls record_run directly per leg; verify the typical SHARC + ASMI rows."""
     exp = _exp(tmp_path)
     with ResultStore(tmp_path / "r.db") as store:
         store.start_experiment(exp)
-        store.store(
-            experiment_id="e1",
-            well="A1",
-            sharc={"success": True, "results": [None, {"cure": "ok"}, None], "artifacts": {"run_dir": "/x"}},
-            asmi={"success": True, "results": [None, {"force": [1, 2, 3]}, None, None]},
-            sharc_run_id="e1:A1:sharc",
-            asmi_run_id="e1:A1:asmi",
-            sharc_protocol_yaml="protocol:\n  - home:\n",
-            asmi_protocol_yaml="protocol:\n  - home:\n",
+        store.record_run(
+            run_id="e1:A1:sharc", experiment_id="e1", well="A1",
+            kind="sharc", station="sharc", success=True,
+            protocol_yaml="protocol:\n  - home:\n",
+            result=[None, {"cure": "ok"}, None], artifacts={"run_dir": "/x"},
+        )
+        store.record_run(
+            run_id="e1:A1:asmi", experiment_id="e1", well="A1",
+            kind="asmi", station="asmi", success=True,
+            protocol_yaml="protocol:\n  - home:\n",
+            result=[None, {"force": [1, 2, 3]}, None, None],
         )
         rows = list(store.runs_for_well("e1", "A1"))
         kinds = {r["kind"] for r in rows}
@@ -52,6 +55,23 @@ def test_store_records_two_station_runs(tmp_path):
         assert sharc_row["success"] == 1
         assert "cure" in sharc_row["result_json"]
         assert sharc_row["protocol_yaml"].startswith("protocol:")
+
+
+def test_record_run_persists_failure(tmp_path):
+    """A failed device call should leave a success=0 row + error column."""
+    exp = _exp(tmp_path)
+    with ResultStore(tmp_path / "r.db") as store:
+        store.start_experiment(exp)
+        store.record_run(
+            run_id="e1:A1:asmi", experiment_id="e1", well="A1",
+            kind="asmi", station="asmi", success=False,
+            protocol_yaml="protocol:\n  - home:\n",
+            error="StationRunError: timeout",
+        )
+        rows = list(store.runs_for_well("e1", "A1"))
+        assert len(rows) == 1
+        assert rows[0]["success"] == 0
+        assert "timeout" in rows[0]["error"]
 
 
 def test_resume_skips_done(tmp_path):

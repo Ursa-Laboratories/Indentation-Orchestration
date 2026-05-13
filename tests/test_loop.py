@@ -103,6 +103,46 @@ def test_mock_mode_propagates_to_stations(tmp_path):
     assert asmi.client.runs[0][3] is True
 
 
+def test_mock_modes_per_device_overrides(tmp_path):
+    """run_experiment(mock_modes={...}) routes per-device, overriding the universal mock_mode."""
+    exp = _exp(tmp_path, wells=["A1"])
+    sharc, asmi = _bundles()
+    arm = FakeArm()
+    with ResultStore(tmp_path / "r.db") as results:
+        run_experiment(
+            exp, opentrons=FakeOpentrons(), arm=arm, sharc=sharc, asmi=asmi,
+            results=results,
+            mock_mode=False,
+            mock_modes={"sharc": True, "asmi": False, "arm": True},
+        )
+    # SHARC got mock=True, ASMI got mock=False, arm got mock=True
+    assert sharc.client.runs[0][3] is True, "sharc should have been mocked"
+    assert asmi.client.runs[0][3] is False, "asmi should NOT have been mocked"
+    # arm.transfers tuples: (from, to, run_id, mock_mode); _transfer sends True if arm_mock else None
+    assert all(t[3] is True for t in arm.transfers), f"all arm transfers should have mock_mode=True, got {arm.transfers}"
+
+
+def test_failure_records_failed_row_for_the_failed_step(tmp_path):
+    """When SHARC fails, a runs row with success=0 + error column should be recorded
+    BEFORE the exception propagates — the audit trail must capture the failed leg."""
+    exp = _exp(tmp_path, wells=["A1"])
+    sharc = StationBundle(client=FakeStation("sharc", fail_on_well="A1"), base_protocol_yaml=_SHARC_BASE)
+    asmi = StationBundle(client=FakeStation("asmi"), base_protocol_yaml=_ASMI_BASE)
+    with ResultStore(tmp_path / "r.db") as results:
+        with pytest.raises(Exception):
+            run_experiment(exp, opentrons=FakeOpentrons(), arm=FakeArm(), sharc=sharc, asmi=asmi,
+                           results=results, mock_mode=False)
+        rows = list(results.runs_for_well("e1", "A1"))
+        kinds_by_success = {(r["kind"], r["success"]) for r in rows}
+        # opentrons fill (success), opentrons->uv arm transfer (success), then SHARC FAIL
+        assert ("opentrons_fill", 1) in kinds_by_success
+        assert ("arm_transfer", 1) in kinds_by_success
+        assert ("sharc", 0) in kinds_by_success, f"SHARC failure row should be recorded; got {kinds_by_success}"
+        # The SHARC row should have the error column populated
+        sharc_row = next(r for r in rows if r["kind"] == "sharc")
+        assert sharc_row["error"] and "boom" in sharc_row["error"], sharc_row["error"]
+
+
 def test_only_wells(tmp_path):
     exp = _exp(tmp_path)
     sharc, asmi = _bundles()

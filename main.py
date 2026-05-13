@@ -65,38 +65,9 @@ logging.basicConfig(
 log = logging.getLogger("polymer_indent.main")
 
 
-# -----------------------------------------------------------------------------
-# OPENTRONS — placeholder. REPLACE THIS with the real Flex REST flow.
-# -----------------------------------------------------------------------------
-# The loop only needs an object with a `.run_fill(*, well, volume_ul, formulation,
-# run_id) -> dict` method. The placeholder below logs the requested fill and
-# returns a success-shaped dict so the rest of the cycle proceeds. To wire the
-# actual Opentrons Flex (a working reference is denos's
-# workers/opentrons_worker/opentrons_worker.py):
-#
-#   1. Template a protocol .py with the well id + volume.
-#   2. POST {flex_base_url}/protocols                     (multipart: protocol + labware json)
-#   3. POST {flex_base_url}/runs                          {"data": {"protocolId": <id>}}
-#   4. POST {flex_base_url}/runs/<run_id>/actions         {"data": {"actionType": "play"}}
-#   5. Poll GET {flex_base_url}/runs/<run_id>             until status ∈ {succeeded, failed}
-#
-class OpentronsClient:
-    def __init__(self, base_url: str | None = None, timeout_s: float = 600.0):
-        self.base_url = base_url
-        self.timeout_s = timeout_s
-
-    def run_fill(self, *, well: str, volume_ul: float,
-                 formulation: str | None = None, run_id: str | None = None) -> dict:
-        log.warning("[OPENTRONS PLACEHOLDER] fill well=%s volume_ul=%s formulation=%s "
-                    "(no hardware; replace this method to wire the Flex)",
-                    well, volume_ul, formulation)
-        # TODO(opentrons): real Flex REST flow, see the docstring above.
-        return {
-            "success": True, "placeholder": True,
-            "well": well, "volume_dispensed": volume_ul,
-            "formulation": formulation, "run_id": run_id,
-        }
-# -----------------------------------------------------------------------------
+# Opentrons fill is currently a placeholder — see polymer_indent/clients/opentrons.py
+# for the (still-no-op) implementation and the TODO with the real Flex REST flow.
+# `cfg.opentrons_client()` below returns that client.
 
 
 def _apply_overrides(protocol_yaml: str, edits: dict) -> str:
@@ -152,7 +123,7 @@ def main() -> int:
     )
 
     arm = cfg.arm_client()
-    opentrons = OpentronsClient(base_url=(cfg.raw.get("opentrons") or {}).get("base_url"))
+    opentrons = cfg.opentrons_client()
 
     log.info("=" * 72)
     log.info("polymer-indentation cycle  ·  well=%s  ·  uv: %s%% for %ss  ·  asmi_limit_h=%s  ·  return=%s",

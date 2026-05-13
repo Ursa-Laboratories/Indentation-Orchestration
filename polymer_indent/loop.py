@@ -6,16 +6,17 @@ For each well:
     3. SHARC UV cure   (send gantry+deck+well-swapped protocol to the SHARC Pi)
     4. arm transfer  uv_station -> asmi
     5. ASMI indentation (send gantry+deck+well-swapped protocol to the ASMI Pi)
-    6. results.store(...)
-    7. arm transfer  asmi -> {storage_end if last well else opentrons}
+    6. arm transfer  asmi -> {storage_end if last well else opentrons}
 
-This mirrors the design-doc loop. The only thing that changes in the protocol
-YAML between iterations is the well id (see ``protocol_render.render_protocol``).
+Every step writes its own row to the result store immediately after the device
+returns — including failure rows, written before the exception propagates — so
+the audit trail in ``results/polymer_indent.db`` is never missing a leg.
 """
 
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from typing import Iterable, Optional, Sequence
 
@@ -129,16 +130,16 @@ def _run_one_well(
     arm_mock: bool = False,
 ) -> None:
     # 1. Opentrons fill (placeholder)
-    fill = opentrons.run_fill(
-        well=well,
-        volume_ul=params.get("volume_ul", 350),
-        formulation=params.get("formulation"),
-        run_id=f"{step_id}:fill",
-    )
-    results.record_run(
-        run_id=f"{step_id}:fill", experiment_id=experiment_id, well=well,
+    _record_call(
+        results, run_id=f"{step_id}:fill", experiment_id=experiment_id, well=well,
         kind="opentrons_fill", station="opentrons",
-        success=bool(fill.get("success", True)), finished_at=None, result=fill,
+        call=lambda: opentrons.run_fill(
+            well=well,
+            volume_ul=params.get("volume_ul", 350),
+            formulation=params.get("formulation"),
+            run_id=f"{step_id}:fill",
+        ),
+        wrap=lambda fill: ({"success": _require_success(fill, "opentrons_fill"), "result": fill}),
     )
 
     # 2. arm: opentrons -> uv_station
@@ -148,11 +149,15 @@ def _run_one_well(
     # 3. SHARC UV cure
     sharc_run_id = f"{step_id}:sharc"
     sharc_protocol_yaml = render_protocol(sharc.base_protocol_yaml, well)
-    sharc_result = sharc.client.run_protocol(
-        run_id=sharc_run_id,
-        protocol_yaml=sharc_protocol_yaml,
-        metadata={"experiment_id": experiment_id, "well": well, "step": "sharc"},
-        mock_mode=sharc_mock,
+    _run_station_step(
+        results, run_id=sharc_run_id, experiment_id=experiment_id, well=well,
+        kind="sharc", station="sharc", protocol_yaml=sharc_protocol_yaml,
+        call=lambda: sharc.client.run_protocol(
+            run_id=sharc_run_id,
+            protocol_yaml=sharc_protocol_yaml,
+            metadata={"experiment_id": experiment_id, "well": well, "step": "sharc"},
+            mock_mode=sharc_mock,
+        ),
     )
 
     # 4. arm: uv_station -> asmi
@@ -162,38 +167,95 @@ def _run_one_well(
     # 5. ASMI indentation
     asmi_run_id = f"{step_id}:asmi"
     asmi_protocol_yaml = render_protocol(asmi.base_protocol_yaml, well)
-    asmi_result = asmi.client.run_protocol(
-        run_id=asmi_run_id,
-        protocol_yaml=asmi_protocol_yaml,
-        metadata={"experiment_id": experiment_id, "well": well, "step": "asmi"},
-        mock_mode=asmi_mock,
+    _run_station_step(
+        results, run_id=asmi_run_id, experiment_id=experiment_id, well=well,
+        kind="asmi", station="asmi", protocol_yaml=asmi_protocol_yaml,
+        call=lambda: asmi.client.run_protocol(
+            run_id=asmi_run_id,
+            protocol_yaml=asmi_protocol_yaml,
+            metadata={"experiment_id": experiment_id, "well": well, "step": "asmi"},
+            mock_mode=asmi_mock,
+        ),
     )
 
-    # 6. bookkeeping
-    results.store(
-        experiment_id=experiment_id,
-        well=well,
-        sharc=sharc_result,
-        asmi=asmi_result,
-        sharc_run_id=sharc_run_id,
-        asmi_run_id=asmi_run_id,
-        sharc_protocol_yaml=sharc_protocol_yaml,
-        asmi_protocol_yaml=asmi_protocol_yaml,
-    )
-
-    # 7. arm: asmi -> {storage_end | opentrons}
+    # 6. arm: asmi -> {storage_end | opentrons}
     _transfer(arm, results, experiment_id, well, step_id, "return",
               "asmi", return_location, mock_mode=arm_mock)
 
 
+def _require_success(payload, kind: str) -> bool:
+    """Read ``payload['success']`` strictly — missing key is a contract violation."""
+    if "success" not in payload:
+        raise RuntimeError(f"{kind} response missing 'success' field: {payload!r}")
+    return bool(payload["success"])
+
+
+def _record_call(results, *, run_id, experiment_id, well, kind, station, call, wrap):
+    """Run ``call``; record the row (success or failure) before returning/re-raising."""
+    started = time.time()
+    try:
+        payload = call()
+    except Exception as exc:
+        results.record_run(
+            run_id=run_id, experiment_id=experiment_id, well=well,
+            kind=kind, station=station,
+            success=False, started_at=started, finished_at=time.time(),
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        raise
+    record = wrap(payload)
+    results.record_run(
+        run_id=run_id, experiment_id=experiment_id, well=well,
+        kind=kind, station=station,
+        success=record["success"], started_at=started, finished_at=time.time(),
+        result=record["result"],
+    )
+
+
+def _run_station_step(results, *, run_id, experiment_id, well, kind, station, protocol_yaml, call):
+    """SHARC / ASMI station step: run, then persist protocol_yaml + result + artifacts in one row."""
+    started = time.time()
+    try:
+        resp = call()
+    except Exception as exc:
+        results.record_run(
+            run_id=run_id, experiment_id=experiment_id, well=well,
+            kind=kind, station=station,
+            success=False, started_at=started, finished_at=time.time(),
+            protocol_yaml=protocol_yaml,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        raise
+    results.record_run(
+        run_id=run_id, experiment_id=experiment_id, well=well,
+        kind=kind, station=station,
+        success=_require_success(resp, kind), started_at=started, finished_at=time.time(),
+        protocol_yaml=protocol_yaml,
+        result=resp.get("results", resp),
+        artifacts=resp.get("artifacts"),
+    )
+
+
 def _transfer(arm, results, experiment_id, well, step_id, tag, src, dst, *, mock_mode=False) -> None:
     run_id = f"{step_id}:{tag}"
-    resp = arm.transfer(from_location=src, to_location=dst, run_id=run_id,
-                        mock_mode=True if mock_mode else None)
+    started = time.time()
+    try:
+        resp = arm.transfer(from_location=src, to_location=dst, run_id=run_id,
+                            mock_mode=True if mock_mode else None)
+    except Exception as exc:
+        results.record_run(
+            run_id=run_id, experiment_id=experiment_id, well=well,
+            kind="arm_transfer", station="xarm",
+            success=False, started_at=started, finished_at=time.time(),
+            result={"from": src, "to": dst},
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        raise
     results.record_run(
         run_id=run_id, experiment_id=experiment_id, well=well,
         kind="arm_transfer", station="xarm",
-        success=bool(resp.get("success", True)), finished_at=None,
+        success=_require_success(resp, "arm_transfer"),
+        started_at=started, finished_at=time.time(),
         result={"from": src, "to": dst, "response": resp},
     )
 

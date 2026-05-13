@@ -18,8 +18,6 @@ execution:
   # GRBL gantry and connect instruments before protocol.run(); mock skips all
   # hardware (cubos setup_protocol(gantry=None, mock_mode=True)).
   mock_mode: false
-  # requests' read timeout the controller should use is derived from this.
-  max_runtime_s: 900
 
 # Pre-flight guard: a received protocol may only reference these instruments
 # and these command verbs. Anything else is rejected before setup_protocol().

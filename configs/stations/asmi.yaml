@@ -12,7 +12,6 @@ run_dir: ~/polymer_indent_runs
 
 execution:
   mock_mode: false
-  max_runtime_s: 900
 
 allow:
   instruments: [asmi]

@@ -57,7 +57,10 @@ def run_cubos_protocol(
         try:
             return protocol.run(context)
         finally:
-            context.board.disconnect_instruments()
+            try:
+                context.board.disconnect_instruments()
+            except Exception:  # noqa: BLE001
+                log.exception("disconnect_instruments() failed during cleanup (mock mode)")
 
     # --- real hardware ---
     from gantry import Gantry  # noqa: PLC0415
@@ -78,9 +81,19 @@ def run_cubos_protocol(
                 raise RuntimeError("gantry health check failed after connect")
             return protocol.run(context)
         finally:
-            context.board.disconnect_instruments()
+            # Don't let a cleanup failure mask the original cubos exception —
+            # log it and continue.
+            log.info("disconnecting instruments")
+            try:
+                context.board.disconnect_instruments()
+            except Exception:  # noqa: BLE001
+                log.exception("disconnect_instruments() failed during cleanup")
     finally:
-        gantry.disconnect()
+        log.info("disconnecting gantry")
+        try:
+            gantry.disconnect()
+        except Exception:  # noqa: BLE001
+            log.exception("gantry.disconnect() failed during cleanup")
 
 
 def validate_cubos_protocol(

@@ -36,7 +36,6 @@ def create_app(cfg: StationConfig) -> Flask:
 
     run_lock = threading.Lock()
     state = {"busy": False, "current_run_id": None}
-    stop_event = threading.Event()  # best-effort signal; see /stop
 
     # ----- helpers -----------------------------------------------------
 
@@ -120,7 +119,6 @@ def create_app(cfg: StationConfig) -> Flask:
 
         state["busy"] = True
         state["current_run_id"] = run_id
-        stop_event.clear()
         rd = RunDir(cfg.run_dir, run_id)
         started = now()
         digests = rd.write_inputs(gantry_yaml=gantry_yaml, deck_yaml=deck_yaml, protocol_yaml=protocol_yaml)
@@ -177,17 +175,15 @@ def create_app(cfg: StationConfig) -> Flask:
 
     @app.post("/stop")
     def stop():
-        # Best effort only. cubos has no graceful mid-``protocol.run()`` abort
-        # and the in-flight gantry handle is owned by the running request, not
-        # reachable from here. A real emergency stop must be a hardware kill
-        # switch / GRBL feed-hold, not this HTTP endpoint.
-        stop_event.set()
+        # No-op. cubos has no graceful mid-``protocol.run()`` abort and the
+        # in-flight gantry handle is owned by the running request, not reachable
+        # from here. A real emergency stop must be a hardware kill switch /
+        # GRBL feed-hold, not this HTTP endpoint.
         return jsonify({
             "success": True,
             "station_id": cfg.station_id,
-            "note": "stop is best-effort; cubos has no mid-protocol abort — "
+            "note": "stop is a no-op; cubos has no mid-protocol abort — "
                     "use a hardware kill switch for a real emergency stop.",
-            "stop_event_set": True,
             "busy": state["busy"],
             "current_run_id": state["current_run_id"],
         })

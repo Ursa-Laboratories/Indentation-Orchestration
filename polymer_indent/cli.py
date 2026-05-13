@@ -138,10 +138,18 @@ def cmd_health(args: argparse.Namespace) -> int:
     for name, call in targets:
         try:
             info = call()
-            print(f"  {name:<10} OK    {info}")
         except Exception as exc:  # noqa: BLE001
             all_ok = False
             print(f"  {name:<10} DOWN  {exc}")
+            continue
+        # Treat status:"placeholder" / "degraded" as not-OK so an operator running
+        # `polymer-indent health` doesn't think the placeholder Opentrons is wired.
+        status = (info.get("status") or "").lower() if isinstance(info, dict) else ""
+        if status in ("ok", "running", ""):
+            print(f"  {name:<10} OK    {info}")
+        else:
+            all_ok = False
+            print(f"  {name:<10} {status.upper():<5} {info}")
     return 0 if all_ok else 1
 
 

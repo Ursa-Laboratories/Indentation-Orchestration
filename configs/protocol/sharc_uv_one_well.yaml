@@ -8,9 +8,10 @@
 #
 # Notes:
 #   - The instrument is named `uv_curing` in cub_sharc.yaml (driver type
-#     uv_curing, vendor excelitas). cub_sharc.yaml ships it with
-#     `offline: true`; a real cure run needs that flag cleared in the gantry
-#     YAML (or sent without it).
+#     uv_curing, vendor excelitas). Upstream cubos@staging ships `cub_sharc.yaml`
+#     with `offline: true` on this instrument; the local copy at
+#     configs/gantry/sharc_gantry.yaml has that flag stripped, so a real run
+#     will fire the OmniCure.
 #   - The plate is nested in a holder, so the deck path is
 #     `plate_holder.plate.<WELL>`, not `plate.<WELL>`.
 #   - `measurement_height` is a *labware-relative* offset above the well's

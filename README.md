@@ -18,9 +18,9 @@ Replaces `denos`, built on the cleaned-up CubOS YAML interfaces.
             │                       │  uv_curing      │   │  asmi         │
        ┌────▼─────┐                 │ user: sartorius-│   │ user: asmi    │
        │ xArm +   │                 │       scale     │   │               │
-       │ Vention  │                 └─────────────────┘   └───────────────┘
-       │ rail     │  10.210.29.16:5004  10.210.29.12:8000   10.210.29.17:8000
-       └──────────┘
+       │ Vention  │  arm_worker     └─────────────────┘   └───────────────┘
+       │ rail     │  on keeper :5004  10.210.29.12:8000   10.210.29.17:8000
+       └──────────┘  → TCP to .16/.15
 ```
 
 | Role | Device | IP | OS | Login user | What runs there |
@@ -28,7 +28,7 @@ Replaces `denos`, built on the cleaned-up CubOS YAML interfaces.
 | Controller | `bear-den-keeper` | 10.210.29.11 | win10 | Kab Lab | `polymer_indent` (`main.py` / `polymer-indent`) |
 | UV-curing station ("sharc") | `bear-den-scale` | 10.210.29.12 | debian | `sartorius-scale` | `station_worker --config configs/stations/sharc.yaml` + cubos@staging |
 | ASMI station | `bear-den-asmi` | 10.210.29.17 | debian | `asmi` | `station_worker --config configs/stations/asmi.yaml` + cubos@staging |
-| Arm + rail | `bear-den-arm1` (xArm) 10.210.29.16 / `bear-den-vention` 10.210.29.15 | arm worker `:5004` | — | — | existing denos `arm_worker.py` (out of scope here; in denos it runs on keeper) |
+| Arm + rail | `bear-den-arm1` (xArm) 10.210.29.16 / `bear-den-vention` 10.210.29.15 | arm worker on the controller, `localhost:5004` | — | — | `python -m arm_worker` (in this repo; talks TCP to .16 / .15) |
 | Opentrons | Flex 10.210.29.218 | shim `:5003` | — | — | placeholder client only |
 
 ## The clean split
@@ -64,9 +64,9 @@ arm.transfer(asmi -> storage_end if last well else opentrons)
 
 ```
 configs/
-  controller.yaml                  device URLs, per-station file bundles, db path  (TODO: confirm IPs)
-  gantry/sharc_gantry.yaml         verbatim copy of cubos@staging configs/gantry/cub_sharc.yaml
-  gantry/asmi_gantry.yaml          verbatim copy of ASMI_new   configs/gantry/asmi_gantry.yaml
+  controller.yaml                  device URLs, per-station file bundles, db path
+  gantry/sharc_gantry.yaml         verbatim copy of cubos@staging configs/gantry/cub_sharc.yaml (with `offline:` stripped from uv_curing)
+  gantry/asmi_gantry.yaml          verbatim copy of ASMI_new   configs/gantry/new_asmi_gantry_calibration.yaml
   deck/sharc_deck.yaml             verbatim copy of cubos@staging configs/deck/sharc_uv_deck.yaml
   deck/asmi_deck.yaml              verbatim copy of ASMI_new   configs/deck/asmi_deck.yaml
   protocol/sharc_uv_one_well.yaml  one-well UV `measure` (cubos format; cubos ships only a 96-well scan)
@@ -239,9 +239,9 @@ non-mock run on a Pi:
 
 1. Make sure the Pi's cubos is `@staging` and the deck calibration anchors are
    correct (the copied `configs/deck/asmi_deck.yaml` still carries upstream's
-   "TODO re-measure" markers; `cub_sharc.yaml` ships `uv_curing` with
-   `offline: true` — clear that flag in the gantry YAML when you actually want
-   the lamp to fire).
+   "TODO re-measure" markers). The local `configs/gantry/sharc_gantry.yaml`
+   already has `offline:` stripped from `uv_curing`, so a real run will fire
+   the OmniCure — keep `--mock` for dry runs.
 2. `python cubos/setup/validate_setup.py <gantry> <deck> <a-generated-protocol>`.
 3. `python cubos/setup/hello_world.py --gantry <gantry>` jog test.
 4. `polymer-indent validate <experiment.yaml>` (offline `setup_protocol` on each Pi).
@@ -262,16 +262,14 @@ replay/audit). Each Pi also keeps its own per-run directories under `run_dir`.
   into the base protocol. Per-well params (intensity, exposure, force limit, …)
   are recorded with the results; extend `render_protocol` / the base files to
   vary them per well.
-- The arm transfer worker (`arm_worker/`, extracted from denos) runs on the
-  controller box; `configs/controller.yaml` has `arm.base_url` at `10.210.29.16:5004`
-  (the arm's own IP, per the design-doc loop) — in denos this worker actually ran
-  on keeper, so switch it to `http://localhost:5004` if you run it there. Its
-  poses (`arm_worker/positions.py`) and the Opentrons-D1 plate variant should be
-  re-checked against the current rig before a real transfer.
+- The arm-transfer worker (`arm_worker/`, extracted from denos) runs on the
+  controller box; `configs/controller.yaml` has `arm.base_url: http://localhost:5004`
+  to match. Its poses (`arm_worker/positions.py`) and the Opentrons-D1 plate
+  variant should be re-checked against the current rig before any new transfer
+  geometry — the ones in-tree have been validated end-to-end.
 - IPs are set: `bear-den-scale` 10.210.29.12 ("sharc"/UV-curing), `bear-den-asmi`
   10.210.29.17, xArm `bear-den-arm1` 10.210.29.16 (+ Vention rail 10.210.29.15),
-  Opentrons Flex 10.210.29.218. Confirm the ASMI park position in
-  `configs/protocol/asmi_indentation_test.yaml`.
+  Opentrons Flex 10.210.29.218.
 - `/stop` is best-effort only; a real emergency stop must be hardware.
 
 ## Tests

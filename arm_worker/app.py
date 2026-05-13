@@ -76,7 +76,8 @@ def create_app(*, mock_mode_default: bool = False, arm_ip: str = P.ARM_IP,
     app = Flask(__name__)
 
     state = {"busy": False, "current": None, "arm": None, "rail": None, "hardware_is_mock": None}
-    hw_lock = threading.Lock()
+    hw_lock = threading.Lock()         # serializes /run; busy → 409
+    state_lock = threading.Lock()      # protects atomic snapshots of state["arm"]/state["rail"] from /stop
     stop_event = threading.Event()
 
     def _check_stop():
@@ -97,7 +98,7 @@ def create_app(*, mock_mode_default: bool = False, arm_ip: str = P.ARM_IP,
             return state["arm"], state["rail"]
         if mock:
             log.info("using MOCK arm + rail (no hardware)")
-            state["arm"], state["rail"] = _MockArm(), _MockRail()
+            arm, rail = _MockArm(), _MockRail()
         else:
             log.info("connecting to xArm (%s) and Vention rail (%s)...", arm_ip, rail_ip)
             from xarm.wrapper import XArmAPI  # noqa: PLC0415
@@ -117,9 +118,10 @@ def create_app(*, mock_mode_default: bool = False, arm_ip: str = P.ARM_IP,
             arm.set_mode(0)
             arm.set_state(0)
             time.sleep(0.5)
-            rail = VentionRailway(ip=rail_ip)   # connect only — DON'T home the rail here;
-            state["arm"], state["rail"] = arm, rail   # the /run handler homes it AFTER retracting the arm
-        state["hardware_is_mock"] = mock
+            rail = VentionRailway(ip=rail_ip)   # connect only — homing left to the routes' _rail_move calls
+        # Atomic swap so a concurrent /stop sees a consistent (arm, rail) pair.
+        with state_lock:
+            state["arm"], state["rail"], state["hardware_is_mock"] = arm, rail, mock
         return state["arm"], state["rail"]
 
     # -- low-level move helpers -----------------------------------------
@@ -171,10 +173,10 @@ def create_app(*, mock_mode_default: bool = False, arm_ip: str = P.ARM_IP,
 
     def pick_from_uv(arm, rail):
         log.info("pick_from_uv")
-        # The /run handler already retracted the arm to ARM_SAFE_POSITION and
-        # homed the rail before calling this, so we go straight to the UV pickup
-        # (no extra SAFE waypoint — denos's version had one here, but it's
-        # redundant after the handler's prelude).
+        # The /run handler retracted the arm to ARM_SAFE_POSITION before calling
+        # this, so we can drive the rail straight to UV (the arm is tucked) and
+        # then go to the UV pickup. No extra SAFE waypoint — denos's version had
+        # one here, but it's redundant after the handler's prelude.
         arm._arm.open_lite6_gripper(); _grip_settle(arm)
         _rail_move(rail, P.UV_RAIL_POSITION_MM)
         _move(arm, P.UV_PICKUP_LIFTED)
@@ -249,23 +251,36 @@ def create_app(*, mock_mode_default: bool = False, arm_ip: str = P.ARM_IP,
     def stop():
         log.warning("STOP requested")
         stop_event.set()
-        arm = state["arm"]
-        if arm is not None and not isinstance(arm, _MockArm):
+        # Snapshot atomically so a concurrent /run swap can't tear
+        # state["arm"] / state["rail"] mid-stop.
+        with state_lock:
+            arm, rail = state["arm"], state["rail"]
+        outcomes = {"arm_set_state_4": None, "arm_gripper_stop": None, "rail_stop": None}
+        if arm is not None and _is_real(arm):
             try:
                 arm.set_state(4)
+                outcomes["arm_set_state_4"] = "ok"
             except Exception as exc:  # noqa: BLE001
-                log.warning("xArm stop error: %s", exc)
+                log.exception("xArm set_state(4) failed")
+                outcomes["arm_set_state_4"] = f"FAILED: {exc!r}"
             try:
                 arm._arm.stop_lite6_gripper()
-            except Exception:  # noqa: BLE001
-                pass
-        rail = state["rail"]
-        if rail is not None:
+                outcomes["arm_gripper_stop"] = "ok"
+            except Exception as exc:  # noqa: BLE001
+                log.exception("xArm gripper stop failed")
+                outcomes["arm_gripper_stop"] = f"FAILED: {exc!r}"
+        if rail is not None and _is_real(rail):
             try:
                 rail.actuator.stop()
-            except Exception:  # noqa: BLE001
-                pass
-        return jsonify({"stopped": True, "device": "xarm", "busy": state["busy"]})
+                outcomes["rail_stop"] = "ok"
+            except Exception as exc:  # noqa: BLE001
+                log.exception("Vention rail stop failed")
+                outcomes["rail_stop"] = f"FAILED: {exc!r}"
+        all_ok = all(v in (None, "ok") for v in outcomes.values())
+        body = {"stopped": all_ok, "device": "xarm", "busy": state["busy"], "outcomes": outcomes}
+        if not all_ok:
+            body["warning"] = "one or more stop calls FAILED — the rig may not be safed; check outcomes"
+        return jsonify(body), (200 if all_ok else 500)
 
     @app.post("/run")
     def run():
@@ -299,6 +314,11 @@ def create_app(*, mock_mode_default: bool = False, arm_ip: str = P.ARM_IP,
                     time.sleep(0.5)
                     if arm.get_state()[1] == 2:
                         break
+                else:
+                    raise RuntimeError(
+                        f"xArm did not reach READY (state==2) within 20 s; "
+                        f"last get_state()={arm.get_state()}. Clear errors in xArm Studio and retry."
+                    )
             _check_stop()
             # Retract the arm to ARM_SAFE_POSITION before any carriage move (the
             # route's first step moves the rail). No rail home — the route's
@@ -313,10 +333,12 @@ def create_app(*, mock_mode_default: bool = False, arm_ip: str = P.ARM_IP,
             return jsonify({"success": True, "from": from_loc, "to": to_loc,
                             "run_id": run_id, "mock": mock})
         except Exception as exc:  # noqa: BLE001 — report, don't crash
-            if stop_event.is_set():
-                return jsonify({"success": False, "error": "stopped by operator",
-                                "from": from_loc, "to": to_loc})
             log.exception("transfer failed: %s -> %s", from_loc, to_loc)
+            if stop_event.is_set():
+                # Stopped-by-operator is also a 500 — the client must surface this
+                # as HttpError so the caller doesn't treat the aborted transfer as a success.
+                return jsonify({"success": False, "error": "stopped by operator",
+                                "from": from_loc, "to": to_loc}), 500
             return jsonify({"success": False, "error": str(exc), "from": from_loc, "to": to_loc}), 500
         finally:
             state["busy"] = False

@@ -16,12 +16,10 @@ class StationConfig:
     port: int = 8000
     run_dir: Path = field(default_factory=lambda: Path.home() / "polymer_indent_runs")
     mock_mode_default: bool = False
-    max_runtime_s: int = 900
     allow_instruments: Set[str] = field(default_factory=set)
     allow_commands: Set[str] = field(default_factory=lambda: {"home", "measure", "move"})
     expected_gantry_sha256: Optional[str] = None
     expected_deck_sha256: Optional[str] = None
-    source_path: Optional[Path] = None
 
 
 def load_station_config(path: str | Path) -> StationConfig:
@@ -44,12 +42,10 @@ def load_station_config(path: str | Path) -> StationConfig:
         port=int(raw.get("port", 8000)),
         run_dir=run_dir,
         mock_mode_default=bool(execution.get("mock_mode", False)),
-        max_runtime_s=int(execution.get("max_runtime_s", 900)),
         allow_instruments=set(allow.get("instruments", []) or []),
         allow_commands=set(allow.get("commands", []) or ["home", "measure", "move"]),
         expected_gantry_sha256=raw.get("expected_gantry_sha256"),
         expected_deck_sha256=raw.get("expected_deck_sha256"),
-        source_path=path,
     )
 
 
