@@ -1,0 +1,27 @@
+# One-well end-to-end cycle: OT fill (placeholder) → arm to UV → UV cure → arm
+# to ASMI → ASMI indent → arm back to Opentrons. Single well, real hardware.
+#
+# Run with:
+#   python main.py run examples/single_well_cycle.yaml          # real
+#   python main.py run examples/single_well_cycle.yaml --mock   # stations skip hardware (arm still moves)
+#
+# Per-well params here are recorded with the results; only the well id is
+# swapped into the SHARC + ASMI base protocols (sharc_uv_one_well.yaml,
+# asmi_indentation_test.yaml), per polymer_indent's current rendering rules.
+
+experiment:
+  id: single_well_cycle_e5
+  defaults:
+    volume_ul: 350           # placeholder — OpentronsClient.run_fill is a no-op
+    uv_intensity: 1
+    uv_time: 1.0
+    asmi_step_size: 0.01
+    force_limit: 10.0
+    baseline_samples: 10
+  wells:
+    E5: {}                   # the one well to cycle (matches the default in both base protocols)
+
+# After ASMI, send the plate BACK to opentrons (the loop's default for non-last
+# wells is opentrons; for the last well it uses this field — we override the
+# usual "storage_end" so a single-well run still returns to the OT deck).
+final_well_return_location: opentrons
