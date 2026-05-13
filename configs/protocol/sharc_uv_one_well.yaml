@@ -27,6 +27,6 @@ protocol:
       measurement_height: 1.0
       method_kwargs:
         intensity: 1
-        exposure_time: 1.0
+        exposure_time: 5.0
 
   - home:

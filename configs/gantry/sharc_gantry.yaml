@@ -39,7 +39,6 @@ instruments:
     offset_x: 0.0
     offset_y: 0.0
     depth: 0.0
-    offline: true
     port: /dev/ttyACM0
     baud_rate: 19200
     default_intensity: 100.0
