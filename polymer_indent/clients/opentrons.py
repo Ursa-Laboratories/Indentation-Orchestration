@@ -46,6 +46,7 @@ def render_viscous_fill_protocol(
     tip_rack_slot: str = "A2",
     tube_rack_slot: str = "B2",
     plate_slot: str = "D2",
+    plate_labware: str = "corning_96_wellplate_360ul_flat",
 ) -> str:
     """Return a one-transfer Flex protocol derived from the pilot script.
 
@@ -105,7 +106,7 @@ custom_tube_rack = {{
 def run(protocol: protocol_api.ProtocolContext):
     tips = protocol.load_labware("opentrons_flex_96_tiprack_1000ul", "{tip_rack_slot}")
     stock_rack = protocol.load_labware_from_definition(custom_tube_rack, "{tube_rack_slot}")
-    plate = protocol.load_labware("corning_96_wellplate_360ul_flat", "{plate_slot}")
+    plate = protocol.load_labware("{plate_labware}", "{plate_slot}")
     p1000 = protocol.load_instrument("flex_1channel_1000", "right", tip_racks=[tips])
 
     p1000.flow_rate.aspirate = {float(flow_rate_ul_min)!r}
@@ -160,6 +161,7 @@ class OpentronsClient:
         tip_rack_slot: str = "A2",
         tube_rack_slot: str = "B2",
         plate_slot: str = "D2",
+        plate_labware: str = "corning_96_wellplate_360ul_flat",
     ) -> Dict[str, Any]:
         """Dispense ``volume_ul`` of ``formulation`` into ``well``.
 
@@ -181,6 +183,7 @@ class OpentronsClient:
                 tip_rack_slot=tip_rack_slot,
                 tube_rack_slot=tube_rack_slot,
                 plate_slot=plate_slot,
+                plate_labware=plate_labware,
             )
 
         log.warning(
@@ -213,6 +216,7 @@ class OpentronsClient:
         tip_rack_slot: str,
         tube_rack_slot: str,
         plate_slot: str,
+        plate_labware: str,
     ) -> Dict[str, Any]:
         protocol_text = render_viscous_fill_protocol(
             source_well=source_well,
@@ -224,6 +228,7 @@ class OpentronsClient:
             tip_rack_slot=tip_rack_slot,
             tube_rack_slot=tube_rack_slot,
             plate_slot=plate_slot,
+            plate_labware=plate_labware,
         )
         protocol_id = self._upload_protocol(protocol_text, key=run_id)
         robot_run_id = self._create_run(protocol_id)

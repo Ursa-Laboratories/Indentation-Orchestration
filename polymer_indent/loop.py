@@ -147,6 +147,7 @@ def _run_one_well(
             tip_rack_slot=params.get("tip_rack_slot", "A2"),
             tube_rack_slot=params.get("tube_rack_slot", "B2"),
             plate_slot=params.get("plate_slot", "D2"),
+            plate_labware=params.get("plate_labware", "corning_96_wellplate_360ul_flat"),
         ),
         wrap=lambda fill: ({"success": _require_success(fill, "opentrons_fill"), "result": fill}),
     )

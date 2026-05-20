@@ -75,6 +75,11 @@ OPENTRONS_TIP_RACK_SLOT = "A2"
 OPENTRONS_TUBE_RACK_SLOT = "B2"
 OPENTRONS_PLATE_SLOT = "D2"
 
+# Opentrons plate labware. Must be a load_name in the Flex labware library.
+# SHARC and ASMI specify their plate in their respective deck.yaml; this SETTING
+# is the Opentrons-side equivalent.
+OPENTRONS_PLATE_LABWARE = "corning_96_wellplate_360ul_flat"
+
 # Opentrons viscous transfer settings
 OPENTRONS_VOLUME_UL = 100
 OPENTRONS_FLOW_RATE_UL_MIN = 150
@@ -91,16 +96,6 @@ ASMI_MEASURE_WITH_RETURN = True   # record up-sweep samples in addition to desce
 
 # Where the plate goes after the final ASMI run.
 FINAL_RETURN_LOCATION = "storage_end"
-
-# Plate-orientation log. Each leg's value is the arm gripper's rotation about
-# the plate's vertical axis between source and destination, in degrees,
-# CCW-positive viewed from above. These are LOGGED only — each station's
-# deck.yaml must already calibrate A1 at the physical location where the arm
-# deposits the plate's A1 corner. Fill these in so the experiment record
-# documents the orientation chain (opentrons A1 -> sharc A1 -> asmi A1).
-PLATE_ROTATION_OT_TO_SHARC_DEG = 0
-PLATE_ROTATION_SHARC_TO_ASMI_DEG = 0
-PLATE_ROTATION_ASMI_TO_RETURN_DEG = 0
 # =============================================================================
 
 
@@ -130,6 +125,7 @@ def main() -> int:
         "tip_rack_slot": OPENTRONS_TIP_RACK_SLOT,
         "tube_rack_slot": OPENTRONS_TUBE_RACK_SLOT,
         "plate_slot": OPENTRONS_PLATE_SLOT,
+        "plate_labware": OPENTRONS_PLATE_LABWARE,
         "uv_intensity": UV_INTENSITY,
         "uv_time": UV_EXPOSURE_S,
         "asmi_indentation_limit_height": ASMI_INDENT_LIMIT_HEIGHT,
@@ -143,14 +139,7 @@ def main() -> int:
         },
         defaults={},
         final_well_return_location=FINAL_RETURN_LOCATION,
-        raw={
-            "opentrons_transfers": TRANSFERS,
-            "plate_rotations_deg": {
-                "opentrons_to_sharc": PLATE_ROTATION_OT_TO_SHARC_DEG,
-                "sharc_to_asmi": PLATE_ROTATION_SHARC_TO_ASMI_DEG,
-                "asmi_to_return": PLATE_ROTATION_ASMI_TO_RETURN_DEG,
-            },
-        },
+        raw={"opentrons_transfers": TRANSFERS},
     )
 
     sharc = cfg.station_bundle("sharc")
@@ -169,9 +158,6 @@ def main() -> int:
     log.info("bioadhesives full loop: %d transfers", len(TRANSFERS))
     for source, target in TRANSFERS:
         log.info("  Opentrons %s -> plate %s, then UV + ASMI %s", source, target, target)
-    log.info("plate rotation: ot -> sharc %+d°, sharc -> asmi %+d°, asmi -> return %+d°",
-             PLATE_ROTATION_OT_TO_SHARC_DEG, PLATE_ROTATION_SHARC_TO_ASMI_DEG,
-             PLATE_ROTATION_ASMI_TO_RETURN_DEG)
     log.info("=" * 72)
 
     with cfg.result_store() as results:
