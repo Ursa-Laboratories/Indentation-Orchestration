@@ -2,64 +2,95 @@
 """
 Bridge the workcell SQLite result store to the ASMI_new analysis pipeline.
 
-Reads ASMI rows for ``EXPERIMENT_ID`` from ``results/polymer_indent.db``, decodes
-the per-well indentation measurements (the same dict that
-``cubos.instruments.asmi.ASMI.indentation`` returns), and writes each well as
-a CSV in the 5-column layout that ``src.analysis.IndentationAnalyzer`` expects:
+Reads ASMI rows for ``EXPERIMENT_ID`` from ``results/polymer_indent.db``, writes
+each well as a CSV in the 5-column layout that ``src.analysis.IndentationAnalyzer``
+expects, then hands off to the helpers in ``main_asmi_with_curetime.py``:
 
-    Timestamp(s),Z_Position(mm),Raw_Force(N),Corrected_Force(N),Direction
+    split_up_down_csv  · analyze_file  · write_summary_csv
 
-If ASMI_new is importable (``ASMI_NEW_PATH`` below points at a checkout), the
-script also runs the Hertzian/linear fit per well and writes ``summary.csv``.
-Without ASMI_new the CSVs are still emitted and can be analyzed by hand or by
-running ``main_asmi_with_curetime.py`` in analyze-only mode.
+The template's module-level imports require a few ASMI_new modules
+(``src.ForceMonitoring``, ``src.CNCController``, ``src.ForceSensor``) that the
+*measurement* path needs but the *analysis* path doesn't. We stub them in
+``sys.modules`` so the import succeeds and only the analysis helpers run.
 
-Edit the SETTINGS block and run:
-    python scripts/analyze_experiment.py
+Edit the SETTINGS block and run with a Python that has numpy/scipy/matplotlib
+(e.g. the ASMI_new venv, not polymer_indent's minimal controller venv):
+    /path/to/ASMI_new/.venv/bin/python scripts/analyze_experiment.py
 """
 
 from __future__ import annotations
 
 import csv
 import json
-import os
 import sqlite3
 import sys
+import types
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterator
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # =============================================================================
 # SETTINGS — edit these
 # =============================================================================
 EXPERIMENT_ID = "bioadhesives_pilot_full_loop"
-RESULTS_DB = Path("results/polymer_indent.db")
-OUTPUT_ROOT = Path("results/measurements")
+RESULTS_DB = REPO_ROOT / "results/polymer_indent.db"
+OUTPUT_ROOT = REPO_ROOT / "results/measurements"
 
-# Pointed at an ASMI_new checkout; we add ``<this>/src`` ancestor to sys.path
-# so ``from src.analysis import IndentationAnalyzer`` resolves. Set to None to
-# only emit CSVs (skip analysis).
-ASMI_NEW_PATH: Path | None = Path("/Users/charl/Programming/panda/ASMI_new")
+# Path to an ASMI_new checkout. We add it to ``sys.path`` so ``src.analysis`` /
+# ``src.plot`` / ``src.version`` resolve when the template imports them.
+ASMI_NEW_PATH = Path("/Users/charl/Programming/panda/ASMI_new")
 
-CONTACT_METHOD = "retrospective"     # "extrapolation" | "retrospective" | "simple_threshold"
-FIT_METHOD = "hertzian"              # "hertzian" | "linear"
+CONTACT_METHOD = "retrospective"   # "extrapolation" | "retrospective" | "simple_threshold"
+FIT_METHOD = "hertzian"            # "hertzian" | "linear"
 APPLY_SYSTEM_CORRECTION = True
 # =============================================================================
 
 
-_CONTACT_KEY_MAP = {
-    "extrapolation": "true_contact",
-    "retrospective": "retrospective",
-    "simple_threshold": "simple_threshold",
-}
+def _stub_missing_template_modules() -> None:
+    """Insert empty stand-ins for the ASMI_new measurement modules.
+
+    ``main_asmi_with_curetime.py`` imports symbols from ``src.ForceMonitoring``,
+    ``src.CNCController``, ``src.ForceSensor`` at module scope. Those modules
+    don't exist in this repo (the template's measurement path runs against the
+    standalone ASMI rig). The analysis helpers we want — ``split_up_down_csv``,
+    ``analyze_file``, ``write_summary_csv``, ``plot_results_via_plotter`` —
+    don't use any of those symbols, so stubbing them lets the template import
+    cleanly.
+    """
+    stubs = {
+        "src.ForceMonitoring": ["simple_indentation_measurement",
+                                "simple_indentation_with_return_measurement",
+                                "get_and_increment_run_count"],
+        "src.CNCController":   ["CNCController"],
+        "src.ForceSensor":     ["ForceSensor"],
+    }
+    # Ensure the parent ``src`` package exists so the dotted imports resolve.
+    sys.modules.setdefault("src", types.ModuleType("src"))
+    for mod_name, names in stubs.items():
+        if mod_name in sys.modules:
+            continue
+        mod = types.ModuleType(mod_name)
+        for name in names:
+            setattr(mod, name, None)
+        sys.modules[mod_name] = mod
+
+
+def _bootstrap_template() -> Any:
+    """Make the template importable and return the module."""
+    sys.path.insert(0, str(ASMI_NEW_PATH))  # src.analysis, src.plot, src.version
+    sys.path.insert(0, str(REPO_ROOT))      # main_asmi_with_curetime
+    _stub_missing_template_modules()
+    import main_asmi_with_curetime  # noqa: PLC0415
+    return main_asmi_with_curetime
 
 
 def load_asmi_runs(db_path: Path, experiment_id: str) -> Iterator[tuple[str, dict[str, Any]]]:
-    """Yield (well, indentation_dict) for each successful ASMI step in the experiment.
+    """Yield (well, indentation_dict) for each successful ASMI step in ``experiment_id``.
 
-    ``result_json`` for a station step is the cubos ``scan`` return — a single
-    ``{well_id: indentation_result}`` entry because the workcell rewrites the
-    YAML to one well per run.
+    ``result_json`` is the cubos ``scan`` return — a single ``{well_id: indentation_result}``
+    entry because the workcell rewrites the YAML to one well per run.
     """
     con = sqlite3.connect(db_path)
     try:
@@ -75,26 +106,25 @@ def load_asmi_runs(db_path: Path, experiment_id: str) -> Iterator[tuple[str, dic
         if not result_json:
             continue
         payload = json.loads(result_json)
-        # The scan command returns Dict[well_id, indentation_result]. With the
-        # workcell's per-well YAML rewrite there's exactly one entry.
         for _well_id, indentation in payload.items():
             if isinstance(indentation, dict) and "measurements" in indentation:
                 yield well, indentation
 
 
 def write_well_csv(out_path: Path, well: str, indentation: dict[str, Any]) -> None:
-    """Write one well's indentation in the IndentationAnalyzer 5-column layout.
+    """Write one well's indentation in the 5-column layout IndentationAnalyzer reads.
 
-    Metadata rows mirror the legacy ``simple_indentation_measurement`` header
-    closely enough for ``determine_poisson_ratio`` and ``detect_force_limit_reached``
-    to work.
+    Metadata mirrors the legacy ``simple_indentation_measurement`` header
+    closely enough for ``determine_poisson_ratio`` and ``detect_force_limit_reached``.
     """
     measurements = indentation["measurements"]
+    if not measurements:
+        return
     baseline_avg = indentation.get("baseline_avg", 0.0)
     baseline_std = indentation.get("baseline_std", 0.0)
     force_exceeded = indentation.get("force_exceeded", False)
-    t0 = measurements[0]["timestamp"] if measurements else 0.0
-    target_z = min((m["z_mm"] for m in measurements), default=0.0)
+    t0 = measurements[0]["timestamp"]
+    target_z = min(m["z_mm"] for m in measurements)
 
     with open(out_path, "w", newline="") as f:
         w = csv.writer(f)
@@ -105,7 +135,8 @@ def write_well_csv(out_path: Path, well: str, indentation: dict[str, Any]) -> No
         w.writerow(["Baseline_Force(N)", f"{baseline_avg:.4f}"])
         w.writerow(["Baseline_Std(N)", f"{baseline_std:.4f}"])
         w.writerow([])
-        w.writerow(["Timestamp(s)", "Z_Position(mm)", "Raw_Force(N)", "Corrected_Force(N)", "Direction"])
+        w.writerow(["Timestamp(s)", "Z_Position(mm)", "Raw_Force(N)",
+                    "Corrected_Force(N)", "Direction"])
         for m in measurements:
             w.writerow([
                 f"{m['timestamp'] - t0:.3f}",
@@ -116,108 +147,6 @@ def write_well_csv(out_path: Path, well: str, indentation: dict[str, Any]) -> No
             ])
 
 
-def split_up_down_csv(orig_csv_path: Path) -> tuple[Path | None, Path | None]:
-    """Split a 5-column CSV with a Direction column into ``_down.csv`` / ``_up.csv``.
-
-    Lifted from ``main_asmi_with_curetime.split_up_down_csv``. The template's
-    module-level imports don't resolve in this repo (``src.ForceMonitoring`` is
-    missing), so we vendor the helper rather than import the template.
-    """
-    with open(orig_csv_path, "r") as f:
-        rows = [r for r in csv.reader(f) if r]
-
-    metadata: list[list[str]] = []
-    data: list[list[str]] = []
-    header: list[str] | None = None
-    for r in rows:
-        if len(r) >= 4 and r[0].replace(".", "", 1).replace("-", "", 1).isdigit():
-            data.append(r)
-        elif r and r[0] == "Timestamp(s)":
-            header = r
-        else:
-            metadata.append(r)
-
-    if not data:
-        return None, None
-
-    down = [r for r in data if not (len(r) >= 5 and r[4] == "up")]
-    up = [r for r in data if len(r) >= 5 and r[4] == "up"]
-    # Align the return sweep so analysis sees monotonic depth.
-    up.sort(key=lambda r: abs(float(r[1])))
-
-    def write_subset(path: Path, subset: list[list[str]], label: str) -> None:
-        with open(path, "w", newline="") as fh:
-            w = csv.writer(fh)
-            for m in metadata:
-                w.writerow(m)
-            w.writerow(["Direction_File", label])
-            w.writerow([])
-            w.writerow(header or ["Timestamp(s)", "Z_Position(mm)", "Raw_Force(N)", "Corrected_Force(N)", "Direction"])
-            for r in subset:
-                w.writerow(r)
-
-    root = orig_csv_path.with_suffix("")
-    down_path = root.with_name(root.name + "_down.csv") if down else None
-    up_path = root.with_name(root.name + "_up.csv") if up else None
-    if down_path:
-        write_subset(down_path, down, "down")
-    if up_path:
-        write_subset(up_path, up, "up")
-    return down_path, up_path
-
-
-def maybe_import_analyzer():
-    """Return (IndentationAnalyzer, plotter) if ASMI_new's src is importable, else (None, None)."""
-    if not ASMI_NEW_PATH:
-        return None, None
-    if not ASMI_NEW_PATH.exists():
-        print(f"⚠️  ASMI_NEW_PATH does not exist: {ASMI_NEW_PATH} — skipping analysis")
-        return None, None
-    sys.path.insert(0, str(ASMI_NEW_PATH))
-    try:
-        from src.analysis import IndentationAnalyzer  # type: ignore[import-not-found]
-        from src.plot import plotter  # type: ignore[import-not-found]
-        return IndentationAnalyzer, plotter
-    except ImportError as exc:
-        print(f"⚠️  could not import ASMI_new src ({exc}) — skipping analysis")
-        return None, None
-
-
-def analyze_csv(IndentationAnalyzer, csv_path: Path, well_label: str):
-    """Reuse IndentationAnalyzer.analyze_well on one CSV. Returns AnalysisResult or None."""
-    analyzer = IndentationAnalyzer(str(csv_path.parent))
-    if not analyzer.load_data(csv_path.name):
-        return None
-    return analyzer.analyze_well(
-        well=well_label,
-        poisson_ratio=None,
-        filename=str(csv_path),
-        contact_method=_CONTACT_KEY_MAP.get(CONTACT_METHOD, "true_contact"),
-        fit_method=FIT_METHOD,
-        apply_system_correction=APPLY_SYSTEM_CORRECTION,
-    )
-
-
-def write_summary(run_dir: Path, results: list) -> Path:
-    """Emit a per-well summary CSV (Hertzian E or linear k, depending on FIT_METHOD)."""
-    summary_path = run_dir / "summary.csv"
-    has_linear = any(getattr(r, "spring_constant", None) is not None for r in results if r)
-    with open(summary_path, "w", newline="") as f:
-        w = csv.writer(f)
-        if has_linear:
-            w.writerow(["Well", "SpringConstant_k", "Intercept_b", "R2"])
-            for r in results:
-                if r:
-                    w.writerow([r.well, r.spring_constant, r.linear_intercept, r.linear_fit_quality])
-        else:
-            w.writerow(["Well", "ElasticModulus_Pa", "Uncertainty", "R2", "PoissonRatio", "MaterialType"])
-            for r in results:
-                if r:
-                    w.writerow([r.well, r.elastic_modulus, r.uncertainty, r.fit_quality,
-                                r.poisson_ratio, r.material_type])
-    return summary_path
-
-
 def main() -> int:
     if not RESULTS_DB.exists():
         print(f"❌ results DB not found: {RESULTS_DB}")
@@ -225,38 +154,49 @@ def main() -> int:
 
     runs = list(load_asmi_runs(RESULTS_DB, EXPERIMENT_ID))
     if not runs:
-        print(f"❌ no successful ASMI rows for experiment {EXPERIMENT_ID!r} in {RESULTS_DB}")
+        print(f"❌ no successful ASMI rows for experiment {EXPERIMENT_ID!r}")
         return 1
 
+    template = _bootstrap_template()  # imports split_up_down_csv / analyze_file / write_summary_csv
+
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = OUTPUT_ROOT / f"run_{EXPERIMENT_ID}_{stamp}"
+    run_folder_name = f"run_{EXPERIMENT_ID}_{stamp}"
+    run_dir = OUTPUT_ROOT / run_folder_name
     run_dir.mkdir(parents=True, exist_ok=True)
 
     measure_with_return = any(idn.get("measure_with_return") for _, idn in runs)
     print(f"📁 writing {len(runs)} per-well CSV(s) to {run_dir}  (measure_with_return={measure_with_return})")
 
-    csv_specs: list[tuple[Path, str]] = []  # (csv_path, well_label) per file to analyze
+    # First pass: emit per-well CSVs, splitting direction-tagged data if present.
+    analysis_specs: list[tuple[Path, str]] = []  # (csv_path, well_label)
     for well, indentation in runs:
         csv_path = run_dir / f"well_{well}_{stamp}.csv"
         write_well_csv(csv_path, well, indentation)
         if measure_with_return:
-            down_path, up_path = split_up_down_csv(csv_path)
+            down_path, up_path = template.split_up_down_csv(str(csv_path))
             if down_path:
-                csv_specs.append((down_path, f"{well}_down"))
+                analysis_specs.append((Path(down_path), f"{well}_down"))
             if up_path:
-                csv_specs.append((up_path, f"{well}_up"))
+                analysis_specs.append((Path(up_path), f"{well}_up"))
         else:
-            csv_specs.append((csv_path, well))
+            analysis_specs.append((csv_path, well.upper()))
 
-    IndentationAnalyzer, _plotter = maybe_import_analyzer()
-    if IndentationAnalyzer is None:
-        print(f"📊 CSVs written. To analyze, run:")
-        print(f"   set existing_run_folder='{run_dir}' in main_asmi_with_curetime.py and call main(do_measure=False).")
-        return 0
+    # Second pass: reuse the template's analyze_file (calls IndentationAnalyzer
+    # + plot_results_via_plotter) and write_summary_csv.
+    results = []
+    for csv_path, well_label in analysis_specs:
+        result = template.analyze_file(
+            datafile=str(csv_path),
+            well=well_label,
+            contact_method=CONTACT_METHOD,
+            fit_method=FIT_METHOD,
+            apply_system_correction=APPLY_SYSTEM_CORRECTION,
+        )
+        if result:
+            results.append(result)
 
-    results = [analyze_csv(IndentationAnalyzer, p, label) for p, label in csv_specs]
-    summary = write_summary(run_dir, results)
-    print(f"📊 analysis complete · {sum(1 for r in results if r)}/{len(results)} wells fit · summary={summary}")
+    summary_csv = template.write_summary_csv(run_folder_name, results)
+    print(f"📊 fit {len(results)}/{len(analysis_specs)} wells · summary={summary_csv}")
     return 0
 
 
