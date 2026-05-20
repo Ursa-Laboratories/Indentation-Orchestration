@@ -24,7 +24,7 @@ from typing import Iterable, Optional, Sequence
 
 from .clients import ArmRailClient, CubOSStationClient, OpentronsClient
 from .experiment import Experiment
-from .protocol_render import render_protocol
+from .protocol_render import apply_overrides, render_protocol
 from .results import ResultStore
 
 log = logging.getLogger("polymer_indent.loop")
@@ -163,7 +163,13 @@ def _run_one_well(
 
     # 3. SHARC UV cure
     sharc_run_id = f"{step_id}:sharc"
-    sharc_protocol_yaml = render_protocol(sharc.base_protocol_yaml, well)
+    sharc_yaml = sharc.base_protocol_yaml
+    if "uv_exposure_s" in params:
+        sharc_yaml = apply_overrides(
+            sharc_yaml,
+            method_kwargs={"exposure_time": params["uv_exposure_s"]},
+        )
+    sharc_protocol_yaml = render_protocol(sharc_yaml, well)
     _run_station_step(
         results, run_id=sharc_run_id, experiment_id=experiment_id, well=well,
         kind="sharc", station="sharc", protocol_yaml=sharc_protocol_yaml,

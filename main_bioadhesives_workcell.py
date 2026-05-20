@@ -29,7 +29,8 @@ order):
   2.  ``ArmRailClient.transfer``    — opentrons -> uv_station.
   3.  ``CubOSStationClient.run_protocol`` on SHARC — UV cure YAML built by
                                       ``apply_overrides`` + ``render_protocol``
-                                      (well id swapped per iteration).
+                                      (well id and per-transfer
+                                      ``exposure_time`` swapped per iteration).
   4a. ``CubOSStationClient.run_protocol`` on ASMI  — home-only protocol so
                                       the ASMI gantry is parked before the arm
                                       deposits the plate.
@@ -59,21 +60,21 @@ from pathlib import Path
 EXPERIMENT_ID = "bioadhesives_pilot_full_loop"
 CONTROLLER_CONFIG = "configs/controller.yaml"
 
-# Per-well transfers: (source_tube_well, target_plate_well).
+# Per-well transfers: (source_tube_well, target_plate_well, uv_exposure_s).
 # Tube rack wells available: A1, B1, A2, B2, A3, B3.
 TRANSFERS = [
-    ("A1", "A1"),
-    ("A1", "A2"),
-    ("A1", "A3"),
-    ("B1", "B1"),
-    ("B1", "B2"),
-    ("B1", "B3"),
+    ("A1", "A1", 1.0),
+    ("A1", "A2", 2.0),
+    ("A1", "A3", 3.0),
+    ("B1", "B1", 1.0),
+    ("B1", "B2", 2.0),
+    ("B1", "B3", 3.0),
 ]
 
 # Opentrons deck slots — must match the arm worker's opentrons pickup point.
 OPENTRONS_TIP_RACK_SLOT = "A2"
 OPENTRONS_TUBE_RACK_SLOT = "B2"
-OPENTRONS_PLATE_SLOT = "D2"
+OPENTRONS_PLATE_SLOT = "D1"
 
 # Opentrons plate labware. Must be a load_name in the Flex labware library.
 # SHARC and ASMI specify their plate in their respective deck.yaml; this SETTING
@@ -86,9 +87,8 @@ OPENTRONS_FLOW_RATE_UL_MIN = 150
 OPENTRONS_AIR_EXPULSION_UL = 20
 OPENTRONS_TIP_LIFT_HEIGHT_MM = 8
 
-# UV cure (SHARC station)
+# UV cure (SHARC station). Per-transfer exposure_time lives in TRANSFERS above.
 UV_INTENSITY = 1
-UV_EXPOSURE_S = 5.0
 
 # ASMI indentation
 ASMI_INDENT_LIMIT_HEIGHT = 1.5
@@ -127,15 +127,15 @@ def main() -> int:
         "plate_slot": OPENTRONS_PLATE_SLOT,
         "plate_labware": OPENTRONS_PLATE_LABWARE,
         "uv_intensity": UV_INTENSITY,
-        "uv_time": UV_EXPOSURE_S,
         "asmi_indentation_limit_height": ASMI_INDENT_LIMIT_HEIGHT,
     }
     experiment = Experiment(
         id=EXPERIMENT_ID,
-        wells=[target for _, target in TRANSFERS],
+        wells=[target for _, target, _ in TRANSFERS],
         params={
-            target: {**shared, "source_well": source, "formulation": source}
-            for source, target in TRANSFERS
+            target: {**shared, "source_well": source, "formulation": source,
+                     "uv_exposure_s": uv_exposure_s}
+            for source, target, uv_exposure_s in TRANSFERS
         },
         defaults={},
         final_well_return_location=FINAL_RETURN_LOCATION,
@@ -143,9 +143,11 @@ def main() -> int:
     )
 
     sharc = cfg.station_bundle("sharc")
+    # Only intensity is global; exposure_time is overridden per-well from
+    # params["uv_exposure_s"] inside _run_one_well.
     sharc.base_protocol_yaml = apply_overrides(
         sharc.base_protocol_yaml,
-        method_kwargs={"intensity": UV_INTENSITY, "exposure_time": UV_EXPOSURE_S},
+        method_kwargs={"intensity": UV_INTENSITY},
     )
     asmi = cfg.station_bundle("asmi")
     asmi.base_protocol_yaml = apply_overrides(
@@ -156,8 +158,9 @@ def main() -> int:
 
     log.info("=" * 72)
     log.info("bioadhesives full loop: %d transfers", len(TRANSFERS))
-    for source, target in TRANSFERS:
-        log.info("  Opentrons %s -> plate %s, then UV + ASMI %s", source, target, target)
+    for source, target, uv_s in TRANSFERS:
+        log.info("  Opentrons %s -> plate %s, UV %.1fs, then ASMI %s",
+                 source, target, uv_s, target)
     log.info("=" * 72)
 
     with cfg.result_store() as results:

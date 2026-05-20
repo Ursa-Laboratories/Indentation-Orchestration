@@ -126,6 +126,25 @@ def test_source_well_params_are_passed_to_opentrons(tmp_path):
     ]
 
 
+def test_per_well_uv_exposure_overrides_sharc_yaml(tmp_path):
+    """Each well's params['uv_exposure_s'] should be injected into the SHARC YAML
+    before render, so different wells get different cure times."""
+    exp = _exp(tmp_path, wells=["A1", "A2"])
+    exp.params["A1"]["uv_exposure_s"] = 1.0
+    exp.params["A2"]["uv_exposure_s"] = 3.0
+    sharc, asmi = _bundles()
+    with ResultStore(tmp_path / "r.db") as results:
+        run_experiment(exp, opentrons=FakeOpentrons(), arm=FakeArm(),
+                       sharc=sharc, asmi=asmi, results=results, mock_mode=True)
+    cure_yamls = {rid: p for rid, p, *_ in sharc.client.runs
+                  if rid.endswith(":sharc")}
+    assert "exposure_time: 1.0" in cure_yamls["e1:A1:sharc"]
+    assert "exposure_time: 3.0" in cure_yamls["e1:A2:sharc"]
+    # The pre-deposit home YAML is unaffected — no measure step to override.
+    home_yaml = next(p for rid, p, *_ in sharc.client.runs if rid == "e1:A1:home-sharc")
+    assert "exposure_time" not in home_yaml
+
+
 def test_mock_mode_propagates_to_stations(tmp_path):
     exp = _exp(tmp_path, wells=["A1"])
     sharc, asmi = _bundles()
