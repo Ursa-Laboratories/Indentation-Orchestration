@@ -39,7 +39,10 @@ class FakeStation:
     def run_protocol(self, *, run_id, protocol_yaml, metadata=None, mock_mode=None):
         self.runs.append((run_id, protocol_yaml, metadata, mock_mode))
         well = (metadata or {}).get("well")
-        if well == self.fail_on_well:
+        step = (metadata or {}).get("step")
+        # Only fail the measurement step, not the pre-deposit home — the
+        # failure tests are asserting cure/indent failures, not home failures.
+        if well == self.fail_on_well and step == self.name:
             from polymer_indent.clients import StationRunError
 
             raise StationRunError(self.name, run_id, {"error": "boom"})
@@ -81,16 +84,24 @@ def test_per_well_sequence_and_last_well_routing(tmp_path):
         assert arm.transfers[2][:2] == ("asmi", "opentrons")          # non-last well returns to opentrons
         # last well's return leg goes to storage_end
         assert arm.transfers[-1][:2] == ("asmi", "storage_end")
-        # each station ran once per well
-        assert [r[0] for r in sharc.client.runs] == ["e1:A1:sharc", "e1:A2:sharc", "e1:A3:sharc"]
-        assert [r[0] for r in asmi.client.runs] == ["e1:A1:asmi", "e1:A2:asmi", "e1:A3:asmi"]
-        # protocol sent to SHARC for well A2 has the well swapped in
+        # each station ran twice per well: pre-deposit home + the actual step
+        assert [r[0] for r in sharc.client.runs] == [
+            "e1:A1:home-sharc", "e1:A1:sharc",
+            "e1:A2:home-sharc", "e1:A2:sharc",
+            "e1:A3:home-sharc", "e1:A3:sharc",
+        ]
+        assert [r[0] for r in asmi.client.runs] == [
+            "e1:A1:home-asmi", "e1:A1:asmi",
+            "e1:A2:home-asmi", "e1:A2:asmi",
+            "e1:A3:home-asmi", "e1:A3:asmi",
+        ]
+        # protocol sent to SHARC for well A2's cure has the well swapped in
         a2_proto = next(p for rid, p, *_ in sharc.client.runs if rid == "e1:A2:sharc")
         assert "plate_holder.plate.A2" in a2_proto and "plate_holder.plate.A1" not in a2_proto
         # bookkeeping
         assert results.well_status("e1", "A3") == "done"
         kinds = {row["kind"] for row in results.runs_for_well("e1", "A1")}
-        assert kinds == {"opentrons_fill", "arm_transfer", "sharc", "asmi"}
+        assert kinds == {"opentrons_fill", "arm_transfer", "sharc_home", "sharc", "asmi_home", "asmi"}
 
 
 def test_source_well_params_are_passed_to_opentrons(tmp_path):
@@ -120,8 +131,9 @@ def test_mock_mode_propagates_to_stations(tmp_path):
     with ResultStore(tmp_path / "r.db") as results:
         run_experiment(exp, opentrons=FakeOpentrons(), arm=FakeArm(), sharc=sharc, asmi=asmi,
                        results=results, mock_mode=True)
-    assert sharc.client.runs[0][3] is True
-    assert asmi.client.runs[0][3] is True
+    # both the pre-deposit home and the per-well step honor mock_mode
+    assert all(r[3] is True for r in sharc.client.runs)
+    assert all(r[3] is True for r in asmi.client.runs)
 
 
 def test_mock_modes_per_device_overrides(tmp_path):
@@ -170,7 +182,7 @@ def test_only_wells(tmp_path):
     with ResultStore(tmp_path / "r.db") as results:
         run_experiment(exp, opentrons=FakeOpentrons(), arm=FakeArm(), sharc=sharc, asmi=asmi,
                        results=results, mock_mode=True, only_wells=["A2"])
-    assert [r[0] for r in sharc.client.runs] == ["e1:A2:sharc"]
+    assert [r[0] for r in sharc.client.runs] == ["e1:A2:home-sharc", "e1:A2:sharc"]
 
 
 def test_failure_aborts_by_default(tmp_path):
@@ -207,4 +219,7 @@ def test_resume_skips_done(tmp_path):
         results.set_well_status("e1", "A1", "done")
         run_experiment(exp, opentrons=FakeOpentrons(), arm=FakeArm(), sharc=sharc, asmi=asmi,
                        results=results, mock_mode=True, resume=True)
-    assert [r[0] for r in sharc.client.runs] == ["e1:A2:sharc", "e1:A3:sharc"]
+    assert [r[0] for r in sharc.client.runs] == [
+        "e1:A2:home-sharc", "e1:A2:sharc",
+        "e1:A3:home-sharc", "e1:A3:sharc",
+    ]

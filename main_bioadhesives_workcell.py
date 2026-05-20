@@ -20,17 +20,24 @@ This file is pure configuration + glue. The actual per-well orchestration
 lives in ``polymer_indent.loop.run_experiment``, which calls (per well, in
 order):
 
-  1. ``OpentronsClient.run_fill``  — generates a fresh one-transfer Flex
-                                     protocol from the SETTINGS below and
-                                     ships it to the Opentrons HTTP API.
-  2. ``ArmRailClient.transfer``    — opentrons -> uv_station.
-  3. ``CubOSStationClient.run_protocol`` on SHARC — sends a YAML built by
-                                     ``apply_overrides`` + ``render_protocol``
-                                     (well id swapped per iteration).
-  4. ``ArmRailClient.transfer``    — uv_station -> asmi.
-  5. ``CubOSStationClient.run_protocol`` on ASMI  — same YAML pattern.
-  6. ``ArmRailClient.transfer``    — asmi -> opentrons (or, on the last
-                                     well, to ``FINAL_RETURN_LOCATION``).
+  1.  ``OpentronsClient.run_fill``  — generates a fresh one-transfer Flex
+                                      protocol from the SETTINGS below and
+                                      ships it to the Opentrons HTTP API.
+  2a. ``CubOSStationClient.run_protocol`` on SHARC — home-only protocol so
+                                      the gantry is parked before the arm
+                                      deposits the plate.
+  2.  ``ArmRailClient.transfer``    — opentrons -> uv_station.
+  3.  ``CubOSStationClient.run_protocol`` on SHARC — UV cure YAML built by
+                                      ``apply_overrides`` + ``render_protocol``
+                                      (well id swapped per iteration).
+  4a. ``CubOSStationClient.run_protocol`` on ASMI  — home-only protocol so
+                                      the ASMI gantry is parked before the arm
+                                      deposits the plate.
+  4.  ``ArmRailClient.transfer``    — uv_station -> asmi.
+  5.  ``CubOSStationClient.run_protocol`` on ASMI  — indentation YAML built
+                                      the same way as SHARC.
+  6.  ``ArmRailClient.transfer``    — asmi -> opentrons (or, on the last
+                                      well, to ``FINAL_RETURN_LOCATION``).
 
 The arm worker has a fixed route table keyed on the location names above
 (``opentrons``, ``uv_station``, ``asmi``, ``storage_end``, ``storage_start``);
@@ -84,6 +91,16 @@ ASMI_MEASURE_WITH_RETURN = True   # record up-sweep samples in addition to desce
 
 # Where the plate goes after the final ASMI run.
 FINAL_RETURN_LOCATION = "storage_end"
+
+# Plate-orientation log. Each leg's value is the arm gripper's rotation about
+# the plate's vertical axis between source and destination, in degrees,
+# CCW-positive viewed from above. These are LOGGED only — each station's
+# deck.yaml must already calibrate A1 at the physical location where the arm
+# deposits the plate's A1 corner. Fill these in so the experiment record
+# documents the orientation chain (opentrons A1 -> sharc A1 -> asmi A1).
+PLATE_ROTATION_OT_TO_SHARC_DEG = 0
+PLATE_ROTATION_SHARC_TO_ASMI_DEG = 0
+PLATE_ROTATION_ASMI_TO_RETURN_DEG = 0
 # =============================================================================
 
 
@@ -126,7 +143,14 @@ def main() -> int:
         },
         defaults={},
         final_well_return_location=FINAL_RETURN_LOCATION,
-        raw={"opentrons_transfers": TRANSFERS},
+        raw={
+            "opentrons_transfers": TRANSFERS,
+            "plate_rotations_deg": {
+                "opentrons_to_sharc": PLATE_ROTATION_OT_TO_SHARC_DEG,
+                "sharc_to_asmi": PLATE_ROTATION_SHARC_TO_ASMI_DEG,
+                "asmi_to_return": PLATE_ROTATION_ASMI_TO_RETURN_DEG,
+            },
+        },
     )
 
     sharc = cfg.station_bundle("sharc")
@@ -145,6 +169,9 @@ def main() -> int:
     log.info("bioadhesives full loop: %d transfers", len(TRANSFERS))
     for source, target in TRANSFERS:
         log.info("  Opentrons %s -> plate %s, then UV + ASMI %s", source, target, target)
+    log.info("plate rotation: ot -> sharc %+d°, sharc -> asmi %+d°, asmi -> return %+d°",
+             PLATE_ROTATION_OT_TO_SHARC_DEG, PLATE_ROTATION_SHARC_TO_ASMI_DEG,
+             PLATE_ROTATION_ASMI_TO_RETURN_DEG)
     log.info("=" * 72)
 
     with cfg.result_store() as results:

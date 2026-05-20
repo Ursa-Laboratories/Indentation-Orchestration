@@ -1,12 +1,14 @@
 """The per-well experiment loop.
 
 For each well:
-    1. Opentrons fill                        (placeholder client)
-    2. arm transfer  opentrons -> uv_station
-    3. SHARC UV cure   (send gantry+deck+well-swapped protocol to the SHARC Pi)
-    4. arm transfer  uv_station -> asmi
-    5. ASMI indentation (send gantry+deck+well-swapped protocol to the ASMI Pi)
-    6. arm transfer  asmi -> {storage_end if last well else opentrons}
+    1.  Opentrons fill                                (placeholder client)
+    2a. SHARC: home-only protocol (park gantry before deposit)
+    2.  arm transfer  opentrons -> uv_station
+    3.  SHARC UV cure   (send gantry+deck+well-swapped protocol to the SHARC Pi)
+    4a. ASMI:  home-only protocol (park gantry before deposit)
+    4.  arm transfer  uv_station -> asmi
+    5.  ASMI indentation (send gantry+deck+well-swapped protocol to the ASMI Pi)
+    6.  arm transfer  asmi -> {storage_end if last well else opentrons}
 
 Every step writes its own row to the result store immediately after the device
 returns — including failure rows, written before the exception propagates — so
@@ -149,6 +151,11 @@ def _run_one_well(
         wrap=lambda fill: ({"success": _require_success(fill, "opentrons_fill"), "result": fill}),
     )
 
+    # 2a. Park the SHARC gantry at home so the arm can deposit safely.
+    _home_station(sharc, "sharc", results,
+                  experiment_id=experiment_id, well=well, step_id=step_id,
+                  mock_mode=sharc_mock)
+
     # 2. arm: opentrons -> uv_station
     _transfer(arm, results, experiment_id, well, step_id, "move-to-sharc",
               "opentrons", "uv_station", mock_mode=arm_mock)
@@ -166,6 +173,11 @@ def _run_one_well(
             mock_mode=sharc_mock,
         ),
     )
+
+    # 4a. Park the ASMI gantry at home so the arm can deposit safely.
+    _home_station(asmi, "asmi", results,
+                  experiment_id=experiment_id, well=well, step_id=step_id,
+                  mock_mode=asmi_mock)
 
     # 4. arm: uv_station -> asmi
     _transfer(arm, results, experiment_id, well, step_id, "move-to-asmi",
@@ -216,6 +228,25 @@ def _record_call(results, *, run_id, experiment_id, well, kind, station, call, w
         kind=kind, station=station,
         success=record["success"], started_at=started, finished_at=time.time(),
         result=record["result"],
+    )
+
+
+_HOME_ONLY_PROTOCOL_YAML = "protocol:\n  - home:\n"
+
+
+def _home_station(station: StationBundle, name: str, results, *,
+                  experiment_id: str, well: str, step_id: str, mock_mode: bool) -> None:
+    """Send a home-only protocol so the gantry is parked before the arm deposits."""
+    run_id = f"{step_id}:home-{name}"
+    _run_station_step(
+        results, run_id=run_id, experiment_id=experiment_id, well=well,
+        kind=f"{name}_home", station=name, protocol_yaml=_HOME_ONLY_PROTOCOL_YAML,
+        call=lambda: station.client.run_protocol(
+            run_id=run_id,
+            protocol_yaml=_HOME_ONLY_PROTOCOL_YAML,
+            metadata={"experiment_id": experiment_id, "well": well, "step": f"{name}_home"},
+            mock_mode=mock_mode,
+        ),
     )
 
 
