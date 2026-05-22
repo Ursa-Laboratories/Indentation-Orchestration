@@ -88,9 +88,6 @@ SDK env both live here.
 Pre-flight:
 
 - xArm controller powered on, e-stop released
-- UFactory Studio **disconnected** (it grabs the xArm TCP control socket
-  exclusively; if it's connected, the worker can't acquire the arm and the
-  next `/run` will fail with `xArm is not connect`)
 - Arm parked roughly near `ARM_SAFE_POSITION = [0, 150, 200, 180, 0, 0]` so
   the worker's first linear move can reach it (a far-off pose causes
   `set_position code=-9`, "trajectory planning failed")
