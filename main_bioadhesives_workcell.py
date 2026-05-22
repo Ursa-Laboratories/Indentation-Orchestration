@@ -104,12 +104,12 @@ FINAL_RETURN_LOCATION = "storage_end"
 # Set True to skip the Opentrons dispense — the OpentronsClient placeholder
 # (no base_url) logs a warning and returns success, so arm + SHARC + ASMI run
 # end-to-end while the result store still gets an "opentrons_fill" row.
-SKIP_OPENTRONS_FILL = False
+SKIP_OPENTRONS_FILL = True
 
 # Set True to dry-run JUST the arm movements (no UV cure, no indentation, no
 # Pi gantry homing). SHARC + ASMI /run-protocol calls go through with
 # mock_mode=True; the arm still moves for real.
-MOCK_STATIONS = False
+MOCK_STATIONS = True
 # =============================================================================
 
 

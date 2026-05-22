@@ -60,7 +60,7 @@ class _MockActuator:
 
 
 class _MockRail:
-    """Logging-only stand-in for device_drivers.vention_railway.VentionRailway."""
+    """Logging-only stand-in for arm_worker.vention_railway.VentionRailway."""
 
     def __init__(self):
         self.actuator = _MockActuator()
@@ -103,12 +103,12 @@ def create_app(*, mock_mode_default: bool = False, arm_ip: str = P.ARM_IP,
             log.info("connecting to xArm (%s) and Vention rail (%s)...", arm_ip, rail_ip)
             from xarm.wrapper import XArmAPI  # noqa: PLC0415
             try:
-                from device_drivers.vention_railway import VentionRailway  # noqa: PLC0415
+                from .vention_railway import VentionRailway  # noqa: PLC0415
             except ImportError as exc:
                 raise RuntimeError(
-                    "VentionRailway not importable — put the keeper_pc repo (its "
-                    "device_drivers/) on PYTHONPATH, and `pip install machine-logic-sdk` "
-                    f"(Python 3.10). Original error: {exc}"
+                    "VentionRailway not importable — `pip install -e \".[arm]\"` to "
+                    "get machine-logic-sdk (needs Python 3.10). "
+                    f"Original error: {exc}"
                 ) from exc
             arm = XArmAPI(arm_ip)
             arm.connect()

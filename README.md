@@ -31,47 +31,154 @@ Replaces `denos`, built on the cleaned-up CubOS YAML interfaces.
 | Arm + rail | `bear-den-arm1` (xArm) 10.210.29.16 / `bear-den-vention` 10.210.29.15 | arm worker on the controller, `localhost:5004` | — | — | `python -m arm_worker` (in this repo; talks TCP to .16 / .15) |
 | Opentrons | Flex 10.210.29.218 | shim `:5003` | — | — | placeholder client only |
 
-## Quick start: manual hardware run
+## Launch the workcell
 
-Use three terminals: one SSH session for the UV-cure Raspberry Pi, one SSH
-session for the ASMI Raspberry Pi, and one desktop/controller terminal.
+Four processes need to be up before you run an experiment, in this order:
 
-### 1. Start the UV-cure station server
+1. SHARC station worker (on `bear-den-scale`, the UV-cure Pi)
+2. ASMI station worker (on `bear-den-asmi`)
+3. Arm worker (on the controller box itself, `bear-den-keeper`)
+4. The driver script (also on the controller box)
 
-From the desktop/controller:
+The Opentrons Flex needs to be powered on and reachable at
+`10.210.29.218:31950`, but it has no worker process to start — the controller
+hits its built-in HTTP API directly.
+
+Open four terminals: two SSH'd into the Pis, two on the controller.
+
+### 1. SHARC Pi — UV-curing station worker
 
 ```bash
+# from the controller, ssh in:
 ssh sartorius-scale@10.210.29.12
 cd ~/polymer_indent
+git pull                                                          # pick up new coords/protocols
 .venv/bin/python -m station_worker --config configs/stations/sharc.yaml
 ```
 
-Leave this SSH terminal open. The server should listen on `10.210.29.12:8000`.
+Should print `station sharc listening on 0.0.0.0:8000 …`. Leave open.
+Confirm from the controller:
 
-### 2. Start the ASMI station server
+```bash
+curl -s http://10.210.29.12:8000/health
+```
 
-From a second desktop/controller terminal:
+### 2. ASMI Pi — indentation station worker
 
 ```bash
 ssh asmi@10.210.29.17
 cd ~/polymer_indent
+git pull
 .venv/bin/python -m station_worker --config configs/stations/asmi.yaml
 ```
 
-Leave this SSH terminal open. The server should listen on `10.210.29.17:8000`.
+Confirm:
 
-### 3. Start the run from the desktop/controller
+```bash
+curl -s http://10.210.29.17:8000/health
+```
 
-From the desktop/controller repo checkout:
+### 3. Controller box — arm worker
+
+The arm worker drives the xArm (`10.210.29.16`) and Vention rail
+(`10.210.29.15`) via TCP. It runs on the **controller box**, listening on
+`localhost:5004`, because the orchestration code and the Python 3.10
+SDK env both live here.
+
+Pre-flight:
+
+- xArm controller powered on, e-stop released
+- UFactory Studio **disconnected** (it grabs the xArm TCP control socket
+  exclusively; if it's connected, the worker can't acquire the arm and the
+  next `/run` will fail with `xArm is not connect`)
+- Arm parked roughly near `ARM_SAFE_POSITION = [0, 150, 200, 180, 0, 0]` so
+  the worker's first linear move can reach it (a far-off pose causes
+  `set_position code=-9`, "trajectory planning failed")
+
+Launch (from this repo on the controller):
 
 ```bash
 cd /Users/charl/Programming/panda/polymer_indent
-python main.py
+mkdir -p .run
+/opt/homebrew/Caskroom/miniforge/base/envs/armworker/bin/python \
+  -m arm_worker --port 5004 > .run/arm_worker.log 2>&1 &
 ```
 
-Edit the settings block at the top of `main.py` before running if you need to
-change the well, UV intensity/time, ASMI indentation height, or final return
-location.
+`armworker` is a Python 3.10 conda env with `pip install -e ".[arm]"` — that
+pulls in `xarm-python-sdk` + `machine-logic-sdk`. The Vention driver is
+vendored at `arm_worker/vention_railway.py`; there is **no** PYTHONPATH
+dependency on the keeper_pc repo. Confirm:
+
+```bash
+curl -s http://localhost:5004/health
+```
+
+For a dry run with no hardware: append `--mock` (logging-only stand-ins, no
+SDK imports). Per-request override: include `"mock_mode": true` in the
+`/run` body.
+
+If a previous run failed with `xArm is not connect` after Studio was
+connected, **restart the worker** — it caches the broken `XArmAPI` object:
+
+```bash
+pgrep -f 'python -m arm_worker' | xargs kill   # then relaunch as above
+```
+
+### 4. Controller box — driver script
+
+From a fresh terminal on the controller:
+
+```bash
+cd /Users/charl/Programming/panda/polymer_indent
+python main_bioadhesives_workcell.py
+```
+
+Before running, edit the `SETTINGS` block at the top of the script —
+specifically:
+
+- `TRANSFERS` — list of `(source_tube_well, target_plate_well, uv_exposure_s)` tuples
+- `SKIP_OPENTRONS_FILL` — `True` skips the OT step entirely (placeholder)
+- `MOCK_STATIONS` — `True` runs SHARC + ASMI in cubos `mock_mode` (no UV, no indent, no Pi gantry motion); the arm still moves for real
+
+Safe first-run recipe after any coordinate or protocol change:
+`SKIP_OPENTRONS_FILL=True`, `MOCK_STATIONS=True` — exercises the arm path
+end-to-end without firing UV or pushing the ASMI probe.
+
+Other entrypoints in the same shape:
+
+```bash
+python main.py                            # single-well legacy driver
+python main_asmi_with_curetime.py         # ASMI + per-well cure-time sweep
+polymer-indent run examples/pegda_screen.yaml --mock    # yaml-driven experiments via the CLI
+```
+
+### One-shot bring-up via the CLI
+
+If the controller has SSH keys installed for both Pis (`ssh-copy-id` first;
+no passwords anywhere), `polymer-indent workers` can start/stop all three
+without you SSH'ing in by hand:
+
+```bash
+polymer-indent workers status                 # /health for sharc, asmi, arm
+polymer-indent workers up                     # start all (idempotent)
+polymer-indent workers up sharc asmi          # just the stations
+polymer-indent workers restart arm
+polymer-indent workers logs asmi --lines 80
+polymer-indent workers down                   # stop all
+```
+
+The arm worker is launched as a detached local process tracked by a pidfile
+under `<repo>/.run/`. Stations are started over SSH as a detached
+`setsid python -m station_worker --config …` writing to `worker.log` in the
+repo dir on the Pi. All paths/users live in `configs/controller.yaml`.
+
+### Pre-flight checks
+
+```bash
+polymer-indent health                                           # ping every device
+polymer-indent validate examples/pegda_screen.yaml              # offline setup_protocol on each Pi
+polymer-indent run examples/pegda_screen.yaml --mock            # full loop, no hardware
+```
 
 ## The clean split
 
@@ -181,61 +288,26 @@ git clone <this repo> ~/polymer_indent && cd ~/polymer_indent
 ```
 
 Arm worker (runs on the controller box, `bear-den-keeper`). `--mock` needs only
-flask; real mode needs Python 3.10 (for `machine-logic-sdk`), the `arm` extra,
-and the `keeper_pc` repo's `device_drivers/` on `PYTHONPATH` (that's where
-`VentionRailway` lives):
+flask; real mode needs Python 3.10 (for `machine-logic-sdk`) and the `arm`
+extra. The Vention driver (`arm_worker/vention_railway.py`) is vendored
+here — no `PYTHONPATH` dance, no external repo dependency:
 
 ```bash
 pip install -e ".[arm]"                # flask + xarm-python-sdk + machine-logic-sdk
-# real mode also needs, e.g.:  export PYTHONPATH=/path/to/keeper_pc:$PYTHONPATH
 ```
 
-## Run
+## Run experiments via the CLI
 
-Start each station worker on its Pi, and the arm worker on the controller box —
-either by hand:
-
-```bash
-python -m station_worker --config configs/stations/sharc.yaml      # on the SHARC Pi
-python -m station_worker --config configs/stations/asmi.yaml       # on the ASMI Pi
-python -m arm_worker                                               # on keeper (port 5004); add --mock for no hardware
-```
-
-…or from the controller box with `polymer-indent workers` (SSHes into each Pi
-via the `ssh:` blocks in `controller.yaml`; key-based auth only — run
-`ssh-copy-id <user>@<host>` from the controller first, no passwords anywhere):
+For YAML-driven experiments (the recommended path for anything bigger than a
+quick `main_*.py` script):
 
 ```bash
-polymer-indent workers status                 # /health for sharc, asmi, arm
-polymer-indent workers up                     # start all (idempotent — skips ones already up)
-polymer-indent workers up sharc asmi          # just the stations
-polymer-indent workers restart asmi
-polymer-indent workers logs asmi --lines 80   # tail the worker log on the Pi
-polymer-indent workers down                   # stop all
-```
-
-(The arm worker is launched as a detached local process on the controller box,
-tracked by a pidfile under `<repo>/.run/`. Stations are started over SSH as a
-detached `setsid python -m station_worker --config ...` writing to `worker.log`
-in the repo dir on the Pi.)
-
-Then from the controller:
-
-```bash
-# offline pre-flight: validate every well's protocols on the Pis (no hardware)
-polymer-indent validate examples/pegda_screen.yaml
-
-# dry run end to end (stations skip all hardware)
-polymer-indent run examples/pegda_screen.yaml --mock
-
-# real run
-polymer-indent run examples/pegda_screen.yaml
-polymer-indent run examples/pegda_screen.yaml --resume          # skip wells already done
-polymer-indent run examples/pegda_screen.yaml --only-well A1,B2
-polymer-indent run examples/pegda_screen.yaml --continue-on-error
-
-# ping everything
-polymer-indent health
+polymer-indent validate examples/pegda_screen.yaml              # offline pre-flight on each Pi
+polymer-indent run      examples/pegda_screen.yaml --mock       # full loop, no hardware
+polymer-indent run      examples/pegda_screen.yaml              # real run
+polymer-indent run      examples/pegda_screen.yaml --resume     # skip wells already done
+polymer-indent run      examples/pegda_screen.yaml --only-well A1,B2
+polymer-indent run      examples/pegda_screen.yaml --continue-on-error
 ```
 
 (`python main.py …` is equivalent to the `polymer-indent` console script.)

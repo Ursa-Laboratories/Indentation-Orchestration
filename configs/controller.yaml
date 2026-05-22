@@ -56,12 +56,9 @@ arm:
   base_url: "http://localhost:5004"
   timeout_s: 300
   local:                                                   # `polymer-indent workers ... arm` launches it here
-    # Needs Python 3.10 (machine-logic-sdk) + the keeper_pc repo on PYTHONPATH
-    # (device_drivers.vention_railway). Edit the python path / PYTHONPATH to match
-    # your machine; add --mock to the command for a dry run.
+    # Needs Python 3.10 (machine-logic-sdk). Edit the python path to match your
+    # machine; add --mock to the command for a dry run.
     command: ["/opt/homebrew/Caskroom/miniforge/base/envs/armworker/bin/python", "-m", "arm_worker", "--port", "5004"]
-    env:
-      PYTHONPATH: /Users/charl/Programming/panda/keeper_pc
     log: arm_worker.log                                    # written under <repo>/.run/
 
 opentrons:

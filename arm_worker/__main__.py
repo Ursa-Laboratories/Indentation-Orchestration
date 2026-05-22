@@ -4,9 +4,9 @@
     python -m arm_worker --mock          # logging-only stand-ins (no arm/rail)
     python -m arm_worker --port 5004
 
-Runs on the controller box (bear-den-keeper). Real mode needs `xarm-python-sdk`,
-`machine-logic-sdk` (Python 3.10), and the keeper_pc repo's `device_drivers/` on
-PYTHONPATH. `--mock` needs only flask.
+Runs on the controller box (bear-den-keeper). Real mode needs `xarm-python-sdk`
+and `machine-logic-sdk` (Python 3.10) — both pulled in by `pip install -e ".[arm]"`.
+`--mock` needs only flask.
 """
 
 from __future__ import annotations

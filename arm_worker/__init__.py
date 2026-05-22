@@ -10,9 +10,9 @@ controller box (bear-den-keeper); the main loop / the test scripts POST
   POST /stop
 
 Real mode talks to the xArm (``xarm-python-sdk``) and the Vention rail
-(``device_drivers.vention_railway.VentionRailway`` from the keeper_pc repo —
-must be on PYTHONPATH; needs ``machine-logic-sdk`` / Python 3.10). ``--mock``
-mode (or ``"mock_mode": true`` in a request) runs the same pick/place sequence
+(vendored ``arm_worker.vention_railway.VentionRailway``; needs
+``machine-logic-sdk`` / Python 3.10). ``--mock`` mode (or
+``"mock_mode": true`` in a request) runs the same pick/place sequence
 against logging-only stand-ins so the workflow can be exercised from the
 controller without any arm hardware.
 """

@@ -23,9 +23,9 @@ station = [
     "cubos[asmi] @ git+https://github.com/ursa-laboratories/CubOS.git@staging",
 ]
 # The xArm + Vention-rail transfer worker (runs on the controller box). Needs
-# Python 3.10 — machine-logic-sdk doesn't support 3.11+ — plus the keeper_pc
-# repo's device_drivers/ on PYTHONPATH for VentionRailway. (`arm_worker --mock`
-# needs only flask.)
+# Python 3.10 — machine-logic-sdk doesn't support 3.11+. The Vention driver
+# (arm_worker/vention_railway.py) is vendored, so no PYTHONPATH dance.
+# (`arm_worker --mock` needs only flask.)
 arm = [
     "flask",
     "xarm-python-sdk==1.15.3",
