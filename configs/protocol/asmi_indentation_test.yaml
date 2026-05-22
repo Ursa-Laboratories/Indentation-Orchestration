@@ -10,12 +10,12 @@
 # For a real indent, drop it to a negative value (e.g. -5.0 = 5 mm into the
 # well). cubos requires indentation_limit_height ≤ measurement_height.
 #
-# Flow: home → measure one well → home  (the final `home` retracts Z then parks
-# at the homing corner — no literal park XY to risk the soft limits).
+# Flow: measure one well → home  (the trailing `home` retracts Z then parks
+# at the homing corner so the arm can safely pick the plate back up). No
+# leading `home:` — the controller already runs a home-only protocol on
+# ASMI before the arm deposits the plate (see polymer_indent/loop.py).
 
 protocol:
-  - home:
-
   - measure:
       instrument: asmi
       position: plate.E5            # well; the controller rewrites this per iteration

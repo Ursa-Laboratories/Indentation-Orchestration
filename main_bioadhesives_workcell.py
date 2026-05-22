@@ -62,14 +62,18 @@ CONTROLLER_CONFIG = "configs/controller.yaml"
 
 # Per-well transfers: (source_tube_well, target_plate_well, uv_exposure_s).
 # Tube rack wells available: A1, B1, A2, B2, A3, B3.
+# TRANSFERS = [
+#     ("A1", "A1", 1.0),
+#     ("A1", "A2", 2.0),
+#     ("A1", "A3", 3.0),
+#     ("B1", "B1", 1.0),
+#     ("B1", "B2", 2.0),
+#     ("B1", "B3", 3.0),
+# ]
+
 TRANSFERS = [
-    ("A1", "A1", 1.0),
-    ("A1", "A2", 2.0),
-    ("A1", "A3", 3.0),
-    ("B1", "B1", 1.0),
-    ("B1", "B2", 2.0),
-    ("B1", "B3", 3.0),
-]
+    ("A1", "A1", 11.0)
+    ]
 
 # Opentrons deck slots — must match the arm worker's opentrons pickup point.
 OPENTRONS_TIP_RACK_SLOT = "A2"
@@ -101,6 +105,11 @@ FINAL_RETURN_LOCATION = "storage_end"
 # (no base_url) logs a warning and returns success, so arm + SHARC + ASMI run
 # end-to-end while the result store still gets an "opentrons_fill" row.
 SKIP_OPENTRONS_FILL = False
+
+# Set True to dry-run JUST the arm movements (no UV cure, no indentation, no
+# Pi gantry homing). SHARC + ASMI /run-protocol calls go through with
+# mock_mode=True; the arm still moves for real.
+MOCK_STATIONS = False
 # =============================================================================
 
 
@@ -173,6 +182,10 @@ def main() -> int:
     if SKIP_OPENTRONS_FILL:
         log.warning("SKIP_OPENTRONS_FILL=True — Opentrons step will be a no-op placeholder")
 
+    mock_modes = {"sharc": True, "asmi": True} if MOCK_STATIONS else None
+    if MOCK_STATIONS:
+        log.warning("MOCK_STATIONS=True — SHARC + ASMI protocols run in mock_mode (no UV, no indent, no Pi-side gantry motion)")
+
     with cfg.result_store() as results:
         failed = run_experiment(
             experiment,
@@ -182,6 +195,7 @@ def main() -> int:
             asmi=asmi,
             results=results,
             mock_mode=False,
+            mock_modes=mock_modes,
         )
     return 1 if failed else 0
 

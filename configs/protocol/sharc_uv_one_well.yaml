@@ -17,10 +17,12 @@
 #   - `measurement_height` is a *labware-relative* offset above the well's
 #     calibrated surface Z. With the SHARC deck config 1.0 resolves to
 #     action Z = 90.5 (see configs/deck/sharc_deck.yaml).
+#   - No leading `home:`. The controller already runs a home-only protocol on
+#     SHARC before the arm deposits the plate (see polymer_indent/loop.py).
+#     The trailing `home:` stays so the gantry retracts before the arm picks
+#     the plate back up.
 
 protocol:
-  - home:
-
   - measure:
       instrument: uv_curing
       position: plate_holder.plate.E5

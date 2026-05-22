@@ -9,8 +9,8 @@ from polymer_indent.protocol_render import render_protocol
 def test_swaps_well_in_asmi_base(asmi_base_protocol):
     out = render_protocol(asmi_base_protocol, "B7")
     doc = yaml.safe_load(out)
-    assert [next(iter(s)) for s in doc["protocol"]] == ["home", "measure", "home"]
-    measure = doc["protocol"][1]["measure"]
+    assert [next(iter(s)) for s in doc["protocol"]] == ["measure", "home"]
+    measure = doc["protocol"][0]["measure"]
     assert measure["position"] == "plate.B7"
     assert measure["method"] == "indentation"
     assert "plate.E5" not in out
