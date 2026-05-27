@@ -16,3 +16,6 @@ runs/
 # local arm-worker pidfile/log used by `polymer-indent workers ... arm`
 .run/
 .DS_Store
+.codegraph/
+.cursor/
+.venv-arm/

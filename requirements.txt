@@ -5,5 +5,5 @@ requests
 # --- station Pi only (run on the SHARC / ASMI Raspberry Pis) ---
 # Install these on the Pis instead:
 #   pip install flask
-#   pip install "cubos @ git+https://github.com/ursa-laboratories/CubOS.git@staging"
+#   pip install "cubos @ git+https://github.com/ursa-laboratories/CubOS.git@main"
 # or just:  pip install -e ".[station]"

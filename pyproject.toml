@@ -20,7 +20,7 @@ dependencies = [
 # checkouts; this entry makes a clean-machine install work too.
 station = [
     "flask",
-    "cubos[asmi] @ git+https://github.com/ursa-laboratories/CubOS.git@staging",
+    "cubos[asmi] @ git+https://github.com/ursa-laboratories/CubOS.git@main",
 ]
 # The xArm + Vention-rail transfer worker (runs on the controller box). Needs
 # Python 3.10 — machine-logic-sdk doesn't support 3.11+. The Vention driver

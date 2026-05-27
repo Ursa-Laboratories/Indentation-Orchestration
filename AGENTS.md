@@ -89,6 +89,44 @@ worker), uniform timeout/retry/health/stop semantics. If you find yourself
 wanting to import a hardware SDK in `polymer_indent/`, add the call to the
 worker instead.
 
+## Python environments
+
+Use two separate virtual environments:
+
+- Controller/orchestration: the repo's normal `venv` is fine, even when it is
+  Python 3.13. It runs `main_bioadhesives_workcell.py`, the CLI, clients, and
+  result-store code.
+- Real arm worker: must use Python 3.10. The `machine-logic-sdk` dependency
+  rejects Python 3.11+, so `pip install -e ".[arm]"` will fail in the normal
+  Python 3.13 `venv`. Do not fight that resolver error; create/use `.venv-arm`
+  instead.
+
+Preferred local arm-worker env setup on this machine:
+
+```bash
+cd /Users/alexchan/Documents/hephaestus/polymer-indentation
+pyenv install 3.10.18          # skip if already installed
+/Users/alexchan/.pyenv/versions/3.10.18/bin/python -m venv .venv-arm
+source .venv-arm/bin/activate
+python -m pip install -U pip
+python -m pip install -e ".[arm]"
+```
+
+Only use `.venv-arm` to launch `python -m arm_worker --port 5004`. Use the
+normal `venv` for the main orchestration script.
+
+## Development Mode
+
+This repo runs against real hardware (xArm, Vention rail, ASMI Pis, Opentrons Flex). Most day-to-day changes are iterative hardware testing — **Hardware Iteration Mode applies by default here**.
+
+- Make the minimal targeted change. Skip per-iteration test and doc updates.
+- Mark deferred work: `# TODO(iter): test` or `# TODO(iter): doc`.
+- At close-out, sweep `TODO(iter)` tags, run any available offline tests, and update docs for behavior that changed.
+
+Switch to **TDD Mode** only for: planning-mode sessions, new protocol commands, new worker endpoints, or changes to cross-repo interfaces (e.g. `controller.yaml` schema, worker API contracts).
+
+See root `AGENTS.md` for full mode definitions.
+
 ## Coordinate / calibration edits
 
 - Arm + rail named poses: `arm_worker/positions.py`. Whenever you change a pose, leave the prior value in the comment + the date you re-measured it (e.g. `# y bumped 37 -> 39 on 2026-05-20`). The Pis pull these via `git pull`.
@@ -115,14 +153,16 @@ See `README.md` for the full setup. The minimal recipe to drive one well
 through real arm + mocked stations + skipped OT:
 
 ```bash
-# 1. start the arm worker (Python 3.10 env)
+# 1. start the arm worker (Python 3.10 .venv-arm env)
 mkdir -p .run
-/opt/homebrew/Caskroom/miniforge/base/envs/armworker/bin/python -m arm_worker --port 5004 > .run/arm_worker.log 2>&1 &
+source .venv-arm/bin/activate
+python -m arm_worker --port 5004 > .run/arm_worker.log 2>&1 &
 
 # 2. confirm
 curl -s http://localhost:5004/health
 
 # 3. drive the loop (reads configs/controller.yaml from cwd)
+source venv/bin/activate
 python main_bioadhesives_workcell.py
 ```
 

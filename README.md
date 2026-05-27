@@ -14,7 +14,7 @@ Replaces `denos`, built on the cleaned-up CubOS YAML interfaces.
             │     ┌─────────▼──┐    ┌───────▼─────────┐   ┌───────────────┐
             │     │ Opentrons  │    │ bear-den-scale  │   │ bear-den-asmi │
             │     │  Flex      │    │ station_worker  │   │ station_worker│
-            │     └────────────┘    │  + cubos@stg    │   │  + cubos@stg  │
+            │     └────────────┘    │  + cubos@main   │   │  + cubos@main │
             │                       │  uv_curing      │   │  asmi         │
        ┌────▼─────┐                 │ user: sartorius-│   │ user: asmi    │
        │ xArm +   │                 │       scale     │   │               │
@@ -26,8 +26,8 @@ Replaces `denos`, built on the cleaned-up CubOS YAML interfaces.
 | Role | Device | IP | OS | Login user | What runs there |
 |------|--------|----|----|------------|-----------------|
 | Controller | `bear-den-keeper` | 10.210.29.11 | win10 | Kab Lab | `polymer_indent` (`main.py` / `polymer-indent`) |
-| UV-curing station ("sharc") | `bear-den-scale` | 10.210.29.12 | debian | `sartorius-scale` | `station_worker --config configs/stations/sharc.yaml` + cubos@staging |
-| ASMI station | `bear-den-asmi` | 10.210.29.17 | debian | `asmi` | `station_worker --config configs/stations/asmi.yaml` + cubos@staging |
+| UV-curing station ("sharc") | `bear-den-scale` | 10.210.29.12 | debian | `sartorius-scale` | `station_worker --config configs/stations/sharc.yaml` + cubos@main |
+| ASMI station | `bear-den-asmi` | 10.210.29.17 | debian | `asmi` | `station_worker --config configs/stations/asmi.yaml` + cubos@main |
 | Arm + rail | `bear-den-arm1` (xArm) 10.210.29.16 / `bear-den-vention` 10.210.29.15 | arm worker on the controller, `localhost:5004` | — | — | `python -m arm_worker` (in this repo; talks TCP to .16 / .15) |
 | Opentrons | Flex 10.210.29.218 | shim `:5003` | — | — | placeholder client only |
 
@@ -184,10 +184,10 @@ polymer-indent run examples/pegda_screen.yaml --mock            # full loop, no 
   result bookkeeping. **No cubos dependency** — it just reads frozen YAMLs,
   swaps a well id into a base protocol, and POSTs `{gantry, deck, protocol}` to
   the station Pi.
-- **SHARC Pi** (`station_worker/` + `cubos@staging`): fixed CubOS gantry/deck
+- **SHARC Pi** (`station_worker/` + `cubos@main`): fixed CubOS gantry/deck
   for the UV station; receives one protocol YAML per well, runs it, returns
   results.
-- **ASMI Pi** (`station_worker/` + `cubos@staging`): fixed CubOS gantry/deck for
+- **ASMI Pi** (`station_worker/` + `cubos@main`): fixed CubOS gantry/deck for
   the ASMI station; same.
 - **Protocol YAMLs** are the frozen cubos base protocols with the well id
   rewritten in memory by the main loop (a one-line text edit — see
@@ -211,14 +211,14 @@ arm.transfer(asmi -> storage_end if last well else opentrons)
 ```
 configs/
   controller.yaml                  device URLs, per-station file bundles, db path
-  gantry/sharc_gantry.yaml         verbatim copy of cubos@staging configs/gantry/cub_sharc.yaml (with `offline:` stripped from uv_curing)
+  gantry/sharc_gantry.yaml         CubOS-compatible copy of configs/gantry/cub_sharc.yaml (with `offline:` stripped from uv_curing)
   gantry/asmi_gantry.yaml          verbatim copy of ASMI_new   configs/gantry/new_asmi_gantry_calibration.yaml
-  deck/sharc_deck.yaml             verbatim copy of cubos@staging configs/deck/sharc_uv_deck.yaml
+  deck/sharc_deck.yaml             CubOS-compatible copy of configs/deck/sharc_uv_deck.yaml
   deck/asmi_deck.yaml              verbatim copy of ASMI_new   configs/deck/asmi_deck.yaml
   protocol/sharc_uv_one_well.yaml  one-well UV `measure` (cubos format; cubos ships only a 96-well scan)
   protocol/asmi_indentation_test.yaml  verbatim copy of ASMI_new (one-well `measure`)
   protocol/asmi_indentation.yaml   verbatim copy of ASMI_new (full-plate scan; reference only)
-  protocol/sharc_uv_curing_scan.yaml   verbatim copy of cubos@staging (full-plate scan; reference only)
+  protocol/sharc_uv_curing_scan.yaml   CubOS-compatible full-plate scan; reference only
   stations/{sharc,asmi}.yaml       station-worker server config (port, run dir, allow-list)
 polymer_indent/                    the controller package (no cubos dep)
   cli.py  experiment.py  protocol_render.py  results.py  loop.py  config.py
@@ -348,7 +348,7 @@ same sequence against logging-only stand-ins — no xArm / rail / SDK imports.
 `station_worker` drives real GRBL gantries and instruments via cubos. Before any
 non-mock run on a Pi:
 
-1. Make sure the Pi's cubos is `@staging` and the deck calibration anchors are
+1. Make sure the Pi's cubos is `@main` and the deck calibration anchors are
    correct (the copied `configs/deck/asmi_deck.yaml` still carries upstream's
    "TODO re-measure" markers). The local `configs/gantry/sharc_gantry.yaml`
    already has `offline:` stripped from `uv_curing`, so a real run will fire

@@ -22,8 +22,8 @@
 stations:
   sharc:                                                  # UV-curing station = bear-den-scale
     base_url: "http://10.210.29.12:8000"
-    gantry_config: configs/gantry/sharc_gantry.yaml        # verbatim cubos@staging cub_sharc.yaml
-    deck_config:   configs/deck/sharc_deck.yaml            # verbatim cubos@staging sharc_uv_deck.yaml
+    gantry_config: configs/gantry/sharc_gantry.yaml        # CubOS-compatible cub_sharc.yaml
+    deck_config:   configs/deck/sharc_deck.yaml            # CubOS-compatible sharc_uv_deck.yaml
     base_protocol: configs/protocol/sharc_uv_one_well.yaml # well id rewritten per iteration
     timeout_s: 900
     ssh:                                                   # for `polymer-indent workers ... sharc`
