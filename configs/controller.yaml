@@ -37,9 +37,9 @@ stations:
 
   asmi:                                                   # ASMI station = bear-den-asmi
     base_url: "http://10.210.29.17:8000"
-    gantry_config: configs/gantry/asmi_gantry.yaml         # verbatim ASMI_new asmi_gantry.yaml
-    deck_config:   configs/deck/asmi_deck.yaml             # verbatim ASMI_new asmi_deck.yaml
-    base_protocol: configs/protocol/asmi_indentation_test.yaml  # home → measure(indentation) → home; well id rewritten per iteration
+    gantry_config: configs/gantry/asmi_gantry.yaml         # BU-Configs cub_xl_asmi.yaml
+    deck_config:   configs/deck/asmi_deck.yaml             # BU-Configs asmi_deck.yaml
+    base_protocol: configs/protocol/asmi_indentation_a1.yaml    # A1 measure(indentation) → home; well id rewritten per iteration
     timeout_s: 900
     ssh:
       host: 10.210.29.17
