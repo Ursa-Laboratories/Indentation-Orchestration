@@ -212,13 +212,17 @@ arm.transfer(asmi -> storage_end if last well else opentrons)
 configs/
   controller.yaml                  device URLs, per-station file bundles, db path
   gantry/sharc_gantry.yaml         CubOS-compatible copy of configs/gantry/cub_sharc.yaml (with `offline:` stripped from uv_curing)
-  gantry/asmi_gantry.yaml          verbatim copy of ASMI_new   configs/gantry/new_asmi_gantry_calibration.yaml
+  gantry/asmi_gantry.yaml          copy of BU-Configs configs/gantry/cub_xl_asmi.yaml
   deck/sharc_deck.yaml             CubOS-compatible copy of configs/deck/sharc_uv_deck.yaml
-  deck/asmi_deck.yaml              verbatim copy of ASMI_new   configs/deck/asmi_deck.yaml
+  deck/asmi_deck.yaml              copy of BU-Configs configs/deck/asmi_deck.yaml
   protocol/sharc_uv_one_well.yaml  one-well UV `measure` (cubos format; cubos ships only a 96-well scan)
-  protocol/asmi_indentation_test.yaml  verbatim copy of ASMI_new (one-well `measure`)
-  protocol/asmi_indentation.yaml   verbatim copy of ASMI_new (full-plate scan; reference only)
+  protocol/asmi_indentation_test.yaml  local one-well ASMI smoke `measure`
+  protocol/asmi_indentation_a1.yaml    controller ASMI A1 smoke indentation
+  protocol/asmi_move_a1.yaml       BU-Configs ASMI A1 move bring-up
+  protocol/asmi_indentation.yaml   BU-Configs full-plate scan; reference only
+  protocol/sharc_uv_cure_a1.yaml   BU-Configs one-well UV bring-up
   protocol/sharc_uv_curing_scan.yaml   CubOS-compatible full-plate scan; reference only
+  protocol/sharc_uv_motion_scan.yaml   BU-Configs SHARC motion-only scan
   stations/{sharc,asmi}.yaml       station-worker server config (port, run dir, allow-list)
 polymer_indent/                    the controller package (no cubos dep)
   cli.py  experiment.py  protocol_render.py  results.py  loop.py  config.py

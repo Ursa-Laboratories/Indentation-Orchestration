@@ -16,8 +16,7 @@ dependencies = [
 [project.optional-dependencies]
 # Install on each station Pi:  pip install -e ".[station]"
 # cubos[asmi] pulls the Vernier GoDirect SDK (the ASMI Pi needs it; harmless on
-# the UV Pi). cubos is already present on the Pis via the ASMI_new / cubos
-# checkouts; this entry makes a clean-machine install work too.
+# the UV Pi). This entry makes a clean-machine station install use CubOS main.
 station = [
     "flask",
     "cubos[asmi] @ git+https://github.com/ursa-laboratories/CubOS.git@main",

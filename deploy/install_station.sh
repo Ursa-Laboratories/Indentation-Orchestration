@@ -22,7 +22,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 
-echo ">> installing polymer_indent + station extras (flask, cubos@staging)"
+echo ">> installing polymer_indent + station extras (flask, cubos@main)"
 pip install -e ".[station]"
 
 echo ">> sanity: import cubos"

@@ -25,7 +25,7 @@ checkout and its declared pip dependencies. Specifically:
 - Do **not** import from `denos`, `keeper_pc`, `ASMI_new`, `cubos`/`Cubware`,
   or any other panda-monorepo sibling. If you need code from one of those,
   vendor it (with attribution in the file header) and prune unused pieces.
-- The one exception is `cubos@staging`, which is pulled in as a real pip
+- The one exception is `cubos@main`, which is pulled in as a real pip
   dependency in `pyproject.toml` for the station workers — that's fine
   because pip handles it on every machine.
 
