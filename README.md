@@ -211,11 +211,11 @@ arm.transfer(asmi -> storage_end if last well else opentrons)
 ```
 configs/
   controller.yaml                  device URLs, per-station file bundles, db path
-  gantry/sharc_gantry.yaml         CubOS-compatible copy of configs/gantry/cub_sharc.yaml (with `offline:` stripped from uv_curing)
+  gantry/sharc_gantry.yaml         BU-Configs copy of configs/gantry/cub_sharc.yaml
   gantry/asmi_gantry.yaml          copy of BU-Configs configs/gantry/cub_xl_asmi.yaml
   deck/sharc_deck.yaml             CubOS-compatible copy of configs/deck/sharc_uv_deck.yaml
   deck/asmi_deck.yaml              copy of BU-Configs configs/deck/asmi_deck.yaml
-  protocol/sharc_uv_one_well.yaml  one-well UV `measure` (cubos format; cubos ships only a 96-well scan)
+  protocol/sharc_uv_one_well.yaml  BU-Configs SHARC A1 UV bring-up, used as the controller base
   protocol/asmi_indentation_test.yaml  local one-well ASMI smoke `measure`
   protocol/asmi_indentation_a1.yaml    controller ASMI A1 smoke indentation
   protocol/asmi_move_a1.yaml       BU-Configs ASMI A1 move bring-up
@@ -263,6 +263,9 @@ python scripts/test_arm.py --from opentrons --to uv_station --mock   # arm worke
 python scripts/test_arm.py --from opentrons --to uv_station          # real (prompts first)
 python scripts/test_arm.py --from asmi --to storage_end
 python scripts/test_arm.py --health
+python scripts/test_arm_loop.py --mock                              # OT -> SHARC -> ASMI -> OT, 3 cycles
+python scripts/test_arm_loop_with_asmi_pause.py --mock              # OT -> SHARC -> ASMI slide-out, prompt each cycle
+python scripts/test_sharc_to_asmi_slide_in.py --mock                # OT -> SHARC -> ASMI slide-out; y inserts/releases, n returns to SHARC
 ```
 
 Each reads the device's `base_url` (and, for stations, the gantry/deck/base-protocol
@@ -320,7 +323,7 @@ polymer-indent run      examples/pegda_screen.yaml --continue-on-error
 | `GET /health`           | —                                                                 | `{status, station_id, cubos_version, busy, current_run_id, allow}` |
 | `POST /validate-protocol` | `{gantry_config, deck_config, protocol_yaml}`                   | `{valid: bool, steps?, error?}` (offline `setup_protocol`, no hardware) |
 | `POST /run-protocol`    | `{run_id, gantry_config, deck_config, protocol_yaml, mock_mode?, metadata?}` | `{success, run_id, station_id, results, cubos_version, protocol_sha256, artifacts}` — or `{success:false, error, traceback}` (500); `409` if a run is in progress |
-| `POST /stop`            | —                                                                 | best-effort only — cubos has no mid-`protocol.run()` abort; use a hardware kill switch |
+| `POST /stop`            | —                                                                 | best-effort only — cubos has no mid-protocol abort; use a hardware kill switch |
 | `GET /runs/<run_id>`    | —                                                                 | `{run_id, run_dir, protocol_yaml, result, error?}` (404 if unknown) |
 
 On `/run-protocol` the worker: takes the process-wide station lock (one CubOS
@@ -328,8 +331,8 @@ protocol at a time per Pi), checks the protocol against the station `allow`-list
 (instrument & command names), writes `gantry.yaml` / `deck.yaml` / `protocol.yaml`
 + `meta.json` into `run_dir/<sanitized run_id>/`, then — for a **real run** —
 mirrors cubos' `setup/run_protocol.py`: `Gantry(config=…)` → `setup_protocol(…, gantry=gantry)`
-→ `gantry.connect()` → `gantry.prepare_for_protocol_run()` → `board.connect_instruments()`
-→ health check → `protocol.run(context)` → `finally` disconnect instruments + gantry.
+→ `gantry.connect()` → `gantry.prepare_for_protocol_run()` → `context.gantry.connect_instruments()`
+→ health check → `protocol.execute(context)` → `finally` disconnect instruments + gantry.
 A **mock run** (`mock_mode=true`) uses `setup_protocol(gantry=None, mock_mode=True)`
 and touches no hardware. The result JSON is written next to the inputs.
 
@@ -341,8 +344,12 @@ and touches no hardware. The result JSON is written next to the inputs.
 | `POST /run` | `{"from": <loc>, "to": <loc>, "run_id"?, "mock_mode"?}` | `{success, from, to, run_id, mock}` — or `{success:false, error}` (400 bad/unknown route, 409 busy, 500 transfer error) |
 | `POST /stop` | — | best-effort: sets a stop flag and (real mode) `set_state(4)` / stops the gripper & rail |
 
-Locations: `opentrons`, `uv_station`, `asmi`, `storage_end`. Routes: `opentrons→uv_station`,
-`uv_station→asmi`, `asmi→uv_station`, `asmi→opentrons`, `asmi→storage_end`, `opentrons→storage_end`.
+Locations: `opentrons`, `uv_station`, `asmi`, `asmi_pre_push`, `storage_end`.
+Routes:
+`opentrons→uv_station`, `uv_station→asmi`, `uv_station→asmi_pre_push`,
+`asmi_pre_push→asmi`, `asmi_pre_push→uv_station`, `asmi_pre_push→opentrons`,
+`asmi→uv_station`, `asmi→opentrons`,
+`asmi→storage_end`, `opentrons→storage_end`.
 One transfer at a time (process lock). The pick/place sequences + named poses are
 in `arm_worker/positions.py` (lifted verbatim from denos). `mock_mode` runs the
 same sequence against logging-only stand-ins — no xArm / rail / SDK imports.
@@ -353,10 +360,9 @@ same sequence against logging-only stand-ins — no xArm / rail / SDK imports.
 non-mock run on a Pi:
 
 1. Make sure the Pi's cubos is `@main` and the deck calibration anchors are
-   correct (the copied `configs/deck/asmi_deck.yaml` still carries upstream's
-   "TODO re-measure" markers). The local `configs/gantry/sharc_gantry.yaml`
-   already has `offline:` stripped from `uv_curing`, so a real run will fire
-   the OmniCure — keep `--mock` for dry runs.
+   correct. The local station gantry/deck/protocol files are frozen copies from
+   `BU-Configs`; confirm the SHARC `uv_curing.offline` setting before expecting
+   a real run to fire the OmniCure.
 2. `python cubos/setup/validate_setup.py <gantry> <deck> <a-generated-protocol>`.
 3. `python cubos/setup/hello_world.py --gantry <gantry>` jog test.
 4. `polymer-indent validate <experiment.yaml>` (offline `setup_protocol` on each Pi).

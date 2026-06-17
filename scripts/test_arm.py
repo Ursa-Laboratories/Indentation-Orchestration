@@ -8,9 +8,9 @@ Run from the controller box:
     python scripts/test_arm.py --from asmi --to storage_end
     python scripts/test_arm.py --health
 
-Valid locations: opentrons, uv_station, asmi, storage_end. Supported routes are
-whatever the worker's route table allows (opentrons->uv_station, uv_station->asmi,
-asmi->uv_station, asmi->opentrons, asmi->storage_end, opentrons->storage_end).
+Valid locations: opentrons, uv_station, asmi, asmi_pre_push,
+storage_end. Supported routes are whatever
+the worker's route table allows.
 By default reads the arm worker's base_url from configs/controller.yaml; override
 with --url.
 """
@@ -31,7 +31,14 @@ from polymer_indent.clients import ArmRailClient  # noqa: E402
 from polymer_indent.clients._http import HttpError  # noqa: E402
 from polymer_indent.clients.arm_rail import ArmTransferError  # noqa: E402
 
-_LOCATIONS = ["opentrons", "uv_station", "asmi", "storage_end", "storage_start"]
+_LOCATIONS = [
+    "opentrons",
+    "uv_station",
+    "asmi",
+    "asmi_pre_push",
+    "storage_end",
+    "storage_start",
+]
 
 
 def main(argv=None) -> int:

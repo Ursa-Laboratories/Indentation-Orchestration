@@ -169,7 +169,6 @@ def create_app(*, mock_mode_default: bool = False, arm_ip: str = P.ARM_IP,
         _move(arm, lifted)
         _move(arm, P.ARM_SAFE_POSITION)
         arm._arm.stop_lite6_gripper()
-        rail.actuator.home(); rail.actuator.wait_for_move_completion(timeout=60)
 
     def pick_from_uv(arm, rail):
         log.info("pick_from_uv")
@@ -195,7 +194,6 @@ def create_app(*, mock_mode_default: bool = False, arm_ip: str = P.ARM_IP,
         _move(arm, P.UV_PICKUP_LIFTED)
         _move(arm, P.ARM_SAFE_POSITION)
         arm._arm.stop_lite6_gripper()
-        rail.actuator.home(); rail.actuator.wait_for_move_completion(timeout=60)
 
     def pick_from_asmi(arm, rail):
         log.info("pick_from_asmi")
@@ -222,15 +220,57 @@ def create_app(*, mock_mode_default: bool = False, arm_ip: str = P.ARM_IP,
         _move(arm, P.ASMI_SLIDE_IN_LIFTED)
         _move(arm, P.ARM_SAFE_POSITION)
         arm._arm.stop_lite6_gripper()
-        rail.actuator.home(); rail.actuator.wait_for_move_completion(timeout=60)
+
+    def place_at_asmi_pre_push(arm, rail):
+        log.info("place_at_asmi_pre_push")
+        _move(arm, P.ARM_SAFE_POSITION, speed=100)
+        _rail_move(rail, P.ASMI_RAIL_POSITION_MM)
+        _move(arm, P.ASMI_SLIDE_OUT_LIFTED)
+        _move(arm, P.ASMI_SLIDE_OUT_POSITION)
+        log.warning(
+            "stopped at ASMI_SLIDE_OUT_POSITION before slide-in; "
+            "gripper remains closed and rail is not homed"
+        )
+
+    def insert_asmi_from_pre_push(arm, rail):
+        log.info("insert_asmi_from_pre_push")
+        _move(arm, P.ASMI_SLIDE_IN_POSITION)
+        arm._arm.open_lite6_gripper(); _grip_settle(arm)
+        _move(arm, P.ASMI_SLIDE_IN_PUSH)
+        _move(arm, P.ASMI_SLIDE_IN_POSITION)
+        _move(arm, P.ASMI_SLIDE_IN_LIFTED)
+        _move(arm, P.ARM_SAFE_POSITION)
+        arm._arm.stop_lite6_gripper()
+
+    def return_asmi_pre_push_to_uv(arm, rail):
+        log.info("return_asmi_pre_push_to_uv")
+        _move(arm, P.ASMI_SLIDE_OUT_LIFTED)
+        _move(arm, P.ARM_SAFE_POSITION)
+        place_at_uv(arm, rail)
+
+    def return_asmi_pre_push_to_opentrons(arm, rail):
+        log.info("return_asmi_pre_push_to_opentrons")
+        _move(arm, P.ASMI_SLIDE_OUT_LIFTED)
+        _move(arm, P.ARM_SAFE_POSITION)
+        place_at_opentrons(arm, rail)
 
     routes = {
         ("opentrons", "uv_station"):  lambda a, r: (pick_from_opentrons(a, r), place_at_uv(a, r)),
         ("uv_station", "asmi"):       lambda a, r: (pick_from_uv(a, r),        place_at_asmi(a, r)),
+        ("uv_station", "asmi_pre_push"):
+            lambda a, r: (pick_from_uv(a, r), place_at_asmi_pre_push(a, r)),
+        ("asmi_pre_push", "asmi"): lambda a, r: insert_asmi_from_pre_push(a, r),
+        ("asmi_pre_push", "uv_station"): lambda a, r: return_asmi_pre_push_to_uv(a, r),
+        ("asmi_pre_push", "opentrons"): lambda a, r: return_asmi_pre_push_to_opentrons(a, r),
         ("asmi", "uv_station"):       lambda a, r: (pick_from_asmi(a, r),      place_at_uv(a, r)),
         ("asmi", "opentrons"):        lambda a, r: (pick_from_asmi(a, r),      place_at_opentrons(a, r)),
         ("asmi", "storage_end"):      lambda a, r: (pick_from_asmi(a, r),      place_at_opentrons(a, r)),
         ("opentrons", "storage_end"): lambda a, r: (pick_from_opentrons(a, r), place_at_opentrons(a, r)),
+    }
+    skip_safe_prelude_routes = {
+        ("asmi_pre_push", "asmi"),
+        ("asmi_pre_push", "uv_station"),
+        ("asmi_pre_push", "opentrons"),
     }
     ROUTES.update(routes)  # exported for tests / introspection
 
@@ -294,6 +334,7 @@ def create_app(*, mock_mode_default: bool = False, arm_ip: str = P.ARM_IP,
             from_loc, to_loc = data.get("from"), data.get("to")
             run_id = data.get("run_id")
             mock = bool(data.get("mock_mode", mock_mode_default))
+            skip_safe_prelude = bool(data.get("skip_safe_prelude", False))
             if not from_loc or not to_loc:
                 return jsonify({"success": False, "error": "missing 'from' or 'to'"}), 400
             route_fn = routes.get((from_loc, to_loc))
@@ -301,10 +342,18 @@ def create_app(*, mock_mode_default: bool = False, arm_ip: str = P.ARM_IP,
                 supported = ", ".join(f"{a}->{b}" for a, b in routes)
                 return jsonify({"success": False,
                                 "error": f"no route for '{from_loc}' -> '{to_loc}'; supported: {supported}"}), 400
+            if skip_safe_prelude and (from_loc, to_loc) not in skip_safe_prelude_routes:
+                return jsonify({
+                    "success": False,
+                    "error": "skip_safe_prelude is only allowed for ASMI calibration continuation routes",
+                }), 400
 
             state["busy"] = True
             state["current"] = run_id or f"{from_loc}->{to_loc}"
-            log.info("transfer %s -> %s (run_id=%s, mock=%s)", from_loc, to_loc, run_id, mock)
+            log.info(
+                "transfer %s -> %s (run_id=%s, mock=%s, skip_safe_prelude=%s)",
+                from_loc, to_loc, run_id, mock, skip_safe_prelude,
+            )
 
             arm, rail = _get_hardware(mock)
             if not isinstance(arm, _MockArm):
@@ -325,13 +374,17 @@ def create_app(*, mock_mode_default: bool = False, arm_ip: str = P.ARM_IP,
             # `_rail_move` drives the carriage straight to the station position.
             # (Assumes the arm can reach SAFE from where it is; if it's parked
             # extended/post-fault, jog it clear in xArm Studio before running.)
-            _move(arm, P.ARM_SAFE_POSITION, speed=P.ARM_SPEED)
+            if skip_safe_prelude:
+                log.warning("skipping ARM_SAFE_POSITION prelude for route segment")
+            else:
+                _move(arm, P.ARM_SAFE_POSITION, speed=P.ARM_SPEED)
             _check_stop()
             route_fn(arm, rail)
             _check_stop()
             log.info("transfer complete: %s -> %s", from_loc, to_loc)
             return jsonify({"success": True, "from": from_loc, "to": to_loc,
-                            "run_id": run_id, "mock": mock})
+                            "run_id": run_id, "mock": mock,
+                            "skip_safe_prelude": skip_safe_prelude})
         except Exception as exc:  # noqa: BLE001 — report, don't crash
             log.exception("transfer failed: %s -> %s", from_loc, to_loc)
             if stop_event.is_set():

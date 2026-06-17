@@ -16,16 +16,16 @@ RAIL_TIMEOUT = 15                # rail move timeout (s)
 ARM_SAFE_POSITION = [0, 150, 200, 180, 0, 0]
 
 # UV-curing station
-UV_PICKUP_POSITION = [253, 188, 99, 180, 0, 0]
-UV_PICKUP_LIFTED = [253, 188, 200, 180, 0, 0]
+UV_PICKUP_POSITION = [254, 188, 99, 180, 0, 0]
+UV_PICKUP_LIFTED = [254, 188, 200, 180, 0, 0]
 UV_RAIL_POSITION_MM = 600
 
 # ASMI station (slide-in / slide-out tray) — y bumped 37 -> 39 on 2026-05-20
-ASMI_SLIDE_IN_POSITION = [280.5, 39, 33.5, 180, 0, 90]
-ASMI_SLIDE_IN_LIFTED = [280.5, 39, 200, 180, 0, 90]
-ASMI_SLIDE_OUT_POSITION = [376, 39, 33.5, 180, 0, 90]
-ASMI_SLIDE_OUT_LIFTED = [376, 39, 200, 180, 0, 90]
-ASMI_SLIDE_IN_PUSH = [270.5, 39, 33.5, 180, 0, 90]   # TODO confirm — derived as SLIDE_IN_POSITION − 10 mm in x (seats the plate)
+ASMI_SLIDE_IN_POSITION = [280.5, 42, 33.5, 180, 0, 90]
+ASMI_SLIDE_IN_LIFTED = [280.5, 42, 200, 180, 0, 90]
+ASMI_SLIDE_OUT_POSITION = [376, 42, 33.5, 180, 0, 90]
+ASMI_SLIDE_OUT_LIFTED = [376, 42, 200, 180, 0, 90]
+ASMI_SLIDE_IN_PUSH = [270.5, 42, 33.5, 180, 0, 90]   # TODO confirm — derived as SLIDE_IN_POSITION − 10 mm in x (seats the plate)
 ASMI_RAIL_POSITION_MM = 1000
 
 # Opentrons deck slot D1 — two plate variants; pick one.
@@ -35,7 +35,7 @@ OT_TRANSPARENT = {
     "D1_LIFTED": [313, 117, 200, -180, 0, -90],
 }
 OT_BLACK = {                                                # re-measured 2026-05-20 (was z=117)
-    "D1_PICKUP": [312, 112, 115, -180, 0, -90],
+    "D1_PICKUP": [312, 112, 116, -180, 0, -90],
     "D1_LIFTED": [312, 112, 200, -180, 0, -90],
 }
 

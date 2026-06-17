@@ -109,7 +109,7 @@ SKIP_OPENTRONS_FILL = True
 # Set True to dry-run JUST the arm movements (no UV cure, no indentation, no
 # Pi gantry homing). SHARC + ASMI /run-protocol calls go through with
 # mock_mode=True; the arm still moves for real.
-MOCK_STATIONS = True
+MOCK_STATIONS = False
 # =============================================================================
 
 

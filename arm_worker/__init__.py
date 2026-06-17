@@ -3,7 +3,8 @@
 Extracted from denos (workers/arm_rail_worker/arm_worker.py). Runs on the
 controller box (bear-den-keeper); the main loop / the test scripts POST
 ``{"from": <location>, "to": <location>}`` to it and it moves the plate between
-``opentrons`` / ``uv_station`` / ``asmi`` / ``storage_end``.
+``opentrons`` / ``uv_station`` / ``asmi`` / ASMI calibration states /
+``storage_end``.
 
   GET  /health
   POST /run    {"from": "...", "to": "...", "run_id"?: "...", "mock_mode"?: bool}

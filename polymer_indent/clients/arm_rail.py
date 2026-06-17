@@ -5,9 +5,9 @@ Matches the existing denos arm worker contract:
     POST /run    {"from": <location>, "to": <location>}   -> {"success": bool, ...}
     POST /stop
 
-Locations: ``opentrons``, ``uv_station``, ``asmi``, ``storage_end`` (and
-``storage_start``). The worker has a fixed route table; the controller only
-names the endpoints.
+Locations: ``opentrons``, ``uv_station``, ``asmi``, ASMI calibration states,
+``storage_end`` (and ``storage_start``). The worker has a fixed route table;
+the controller only names the endpoints.
 """
 
 from __future__ import annotations
@@ -45,20 +45,27 @@ class ArmRailClient:
         to_location: str,
         run_id: Optional[str] = None,
         mock_mode: Optional[bool] = None,
+        skip_safe_prelude: bool = False,
     ) -> Dict[str, Any]:
         """Move the plate from one workcell location to another.
 
         ``run_id`` is for logging/audit; ``mock_mode`` (when not ``None``) asks
         the worker to run the pick/place sequence against logging-only stand-ins
         instead of the real arm/rail. Both are sent as best-effort extras —
-        older arm workers ignore them.
+        older arm workers ignore them. ``skip_safe_prelude`` is for calibration
+        route segments that intentionally continue from the current arm pose.
         """
         payload: Dict[str, Any] = {"from": from_location, "to": to_location}
         if run_id:
             payload["run_id"] = run_id
         if mock_mode is not None:
             payload["mock_mode"] = mock_mode
-        log.info("arm transfer %s -> %s (run_id=%s, mock=%s)", from_location, to_location, run_id, mock_mode)
+        if skip_safe_prelude:
+            payload["skip_safe_prelude"] = True
+        log.info(
+            "arm transfer %s -> %s (run_id=%s, mock=%s, skip_safe_prelude=%s)",
+            from_location, to_location, run_id, mock_mode, skip_safe_prelude,
+        )
         resp = post_json(
             self._session, f"{self.base_url}/run", payload, timeout=self.timeout_s
         )
