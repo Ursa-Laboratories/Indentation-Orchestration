@@ -1,25 +1,14 @@
-# ASMI A1 indentation protocol (CubOS entrypoint format).
-#
-# This is the controller-facing ASMI base protocol for the current A1 run.
-# The controller can still rewrite `plate.A1` if a different target well is
-# selected, but the default target in this file is A1.
-#
-# Heights are labware-relative offsets above the calibrated well surface Z.
-# This keeps the same conservative smoke indentation settings as the previous
-# one-well ASMI protocol: the indenter descends only 0.5 mm from the start plane
-# and remains above the well surface.
-
 protocol:
-  - measure:
-      instrument: asmi
-      position: plate.A1
-      method: indentation
-      measurement_height: 2.0
-      indentation_limit_height: 1.5
-      method_kwargs:
-        step_size: 0.01
-        force_limit: 10.0
-        baseline_samples: 10
-        measure_with_return: false
-
-  - home:
+- home: null
+- measure:
+    position: plate.B1
+    instrument: asmi
+    method: indentation
+    measurement_height: -3
+    indentation_limit_height: -5
+    method_kwargs:
+      step_size: 0.01
+      force_limit: 3
+      baseline_samples: 10
+      measure_with_return: false
+- home: null

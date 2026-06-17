@@ -1,37 +1,10 @@
-# SHARC UV curing — single-well protocol (CubOS entrypoint format).
-#
-# This is the per-well base protocol the controller sends to the SHARC Pi.
-# Only the well id in `position:` is rewritten per iteration; everything else
-# is frozen. Pairs with configs/gantry/sharc_gantry.yaml (a CubOS-compatible
-# copy derived from configs/gantry/cub_sharc.yaml) and configs/deck/sharc_deck.yaml
-# (a CubOS-compatible copy of configs/deck/sharc_uv_deck.yaml).
-#
-# Notes:
-#   - The instrument is named `uv_curing` in cub_sharc.yaml (driver type
-#     uv_curing, vendor excelitas). The BU-Configs source has `offline: true`;
-#     the local copy at configs/gantry/sharc_gantry.yaml has that flag stripped,
-#     so a real run will fire the OmniCure.
-#   - The plate is nested in a holder, so the deck path is
-#     `plate_holder.plate.<WELL>`, not `plate.<WELL>`.
-#   - `measurement_height` is a *labware-relative* offset above the well's
-#     calibrated surface Z. With the SHARC deck config 1.0 resolves to
-#     action Z = 90.5 (see configs/deck/sharc_deck.yaml).
-#   - No leading `home:`. The controller already runs a home-only protocol on
-#     SHARC before the arm deposits the plate (see polymer_indent/loop.py).
-
-positions:
-  # Shared park target chosen to remain in-bounds after Sterling pipette offset compensation.
-  park_position: [254, 157, 100.0]
-
 protocol:
-  - home:
-  - measure:
-      instrument: uv_curing
-      position: plate_holder.plate.A1
-      method: cure
-      measurement_height: 1.0
-      method_kwargs:
-        intensity: 1
-        exposure_time: 5.0
-
-  - home:
+- measure:
+    position: plate_holder.plate.A1
+    instrument: uv_curing
+    method: cure
+    measurement_height: 1
+    method_kwargs:
+      intensity: 1
+      exposure_time: 1
+- home: null
