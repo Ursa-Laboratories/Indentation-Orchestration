@@ -37,7 +37,7 @@ def main(argv: list[str] | None = None) -> int:
         cfg.station_id, host, port, cfg.run_dir, cfg.mock_mode_default,
     )
     # threaded=True so /health, /stop, /runs/<id> still respond while a /run-protocol
-    # is in flight; the run_lock keeps cubos.protocol.run strictly one-at-a-time.
+    # is in flight; the run_lock keeps CubOS protocol execution one-at-a-time.
     app.run(host=host, port=port, threaded=True)
     return 0
 

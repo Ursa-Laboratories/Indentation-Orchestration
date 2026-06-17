@@ -2,10 +2,10 @@
 
 Mirrors cubos' own ``setup/run_protocol.py`` for the real-hardware path:
 load gantry config -> ``setup_protocol`` -> ``gantry.connect()`` ->
-``gantry.prepare_for_protocol_run()`` -> ``board.connect_instruments()`` ->
-health check -> ``protocol.run()`` -> ``finally`` disconnect instruments + gantry.
+``gantry.prepare_for_protocol_run()`` -> ``context.gantry.connect_instruments()`` ->
+health check -> ``protocol.execute()`` -> ``finally`` disconnect instruments + gantry.
 
-Mock path: ``setup_protocol(gantry=None, mock_mode=True)`` -> run -> done (cubos
+Mock path: ``setup_protocol(gantry=None, mock_mode=True)`` -> execute -> done (cubos
 constructs offline drivers; ``connect_instruments`` is a no-op for them, and no
 GRBL serial port is opened).
 
@@ -53,12 +53,12 @@ def run_cubos_protocol(
         protocol, context = setup_protocol(
             gantry_path, deck_path, protocol_path, gantry=None, mock_mode=True
         )
-        context.board.connect_instruments()  # no-op for offline drivers
+        context.gantry.connect_instruments()  # no-op for offline drivers
         try:
-            return protocol.run(context)
+            return protocol.execute(context)
         finally:
             try:
-                context.board.disconnect_instruments()
+                context.gantry.disconnect_instruments()
             except Exception:  # noqa: BLE001
                 log.exception("disconnect_instruments() failed during cleanup (mock mode)")
 
@@ -75,17 +75,17 @@ def run_cubos_protocol(
     gantry.connect()
     try:
         gantry.prepare_for_protocol_run()
-        context.board.connect_instruments()
+        context.gantry.connect_instruments()
         try:
             if not gantry.is_healthy():
                 raise RuntimeError("gantry health check failed after connect")
-            return protocol.run(context)
+            return protocol.execute(context)
         finally:
             # Don't let a cleanup failure mask the original cubos exception —
             # log it and continue.
             log.info("disconnecting instruments")
             try:
-                context.board.disconnect_instruments()
+                context.gantry.disconnect_instruments()
             except Exception:  # noqa: BLE001
                 log.exception("disconnect_instruments() failed during cleanup")
     finally:

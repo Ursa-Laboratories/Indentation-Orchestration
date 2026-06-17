@@ -122,7 +122,7 @@ def test_mock_run_roundtrip(tmp_path, station):
     if not vbody.get("valid"):
         err = vbody.get("error", "")
         # A stale installed cubos may not ship every load_name (e.g. the SHARC
-        # holder definition). The Pis run a fresh cubos@staging; skip here.
+        # holder definition). The Pis run a fresh cubos@main; skip here.
         if "DeckLoaderError" in err or "labware/definitions" in err:
             pytest.skip(f"installed cubos can't load this deck: {err.splitlines()[0]}")
         pytest.fail(f"validate-protocol said invalid: {vbody}")

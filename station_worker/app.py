@@ -8,7 +8,7 @@
 
 One CubOS protocol runs at a time per Pi (a process-level lock). If a run is in
 progress, /run-protocol returns 409. /stop is best-effort — cubos has no clean
-mid-``protocol.run()`` abort, so it just disconnects the gantry; the running
+mid-protocol abort, so it just disconnects the gantry; the running
 request will then fail. The worker writes every received bundle and result under
 ``run_dir/<run_id>/`` for replay/audit.
 """
@@ -175,7 +175,7 @@ def create_app(cfg: StationConfig) -> Flask:
 
     @app.post("/stop")
     def stop():
-        # No-op. cubos has no graceful mid-``protocol.run()`` abort and the
+        # No-op. CubOS has no graceful mid-protocol abort and the
         # in-flight gantry handle is owned by the running request, not reachable
         # from here. A real emergency stop must be a hardware kill switch /
         # GRBL feed-hold, not this HTTP endpoint.
