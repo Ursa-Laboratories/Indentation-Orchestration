@@ -20,16 +20,20 @@ sys.path.insert(0, str(REPO_ROOT))
 from polymer_indent.bioadhesives import (  # noqa: E402
     WorkflowWell,
     build_workflow_experiment,
+    confirm_yes,
     controller_health_targets,
     export_joined_well_csv,
     failed_health_names,
+    failed_validation_labels,
     format_health_report,
+    format_validation_report,
     prompt_ready,
     run_health_checks,
+    validate_workflow_protocols,
 )
 from polymer_indent.clients import OpentronsClient  # noqa: E402
 from polymer_indent.config import load_controller_config  # noqa: E402
-from polymer_indent.loop import run_experiment  # noqa: E402
+from polymer_indent.loop import RunSafetyChecks, run_experiment  # noqa: E402
 
 # =============================================================================
 # SETTINGS - edit these
@@ -81,6 +85,11 @@ SKIP_OPENTRONS_FILL = True
 # was launched with --mock.
 MOCK_STATIONS = False
 
+# ASMI safety checks.
+ASMI_SAFETY_CHECKS = True
+ASMI_POSITION_CHECK_WELL = "A1"
+ASMI_POSITION_CHECK_HEIGHT_MM = 10.0
+
 # Joined per-well export written after a run attempt.
 REPORT_CSV = REPO_ROOT / "results" / f"{EXPERIMENT_ID}_joined.csv"
 # =============================================================================
@@ -109,6 +118,22 @@ def main() -> int:
         print(f"Aborting: offline or unready device(s): {', '.join(offline)}", file=sys.stderr)
         return 1
 
+    sharc = cfg.station_bundle("sharc")
+    asmi = cfg.station_bundle("asmi")
+    validation_results = validate_workflow_protocols(
+        experiment,
+        sharc=sharc,
+        asmi=asmi,
+        include_asmi_position_check=ASMI_SAFETY_CHECKS,
+        asmi_position_check_well=ASMI_POSITION_CHECK_WELL,
+        asmi_position_check_height=ASMI_POSITION_CHECK_HEIGHT_MM,
+    )
+    print(format_validation_report(validation_results))
+    invalid = failed_validation_labels(validation_results)
+    if invalid:
+        print(f"Aborting: invalid CubOS setup(s): {', '.join(invalid)}", file=sys.stderr)
+        return 1
+
     _log_run_plan(experiment)
     if not prompt_ready(experiment):
         print("Aborted before starting hardware workflow.")
@@ -129,11 +154,12 @@ def main() -> int:
                 experiment,
                 opentrons=opentrons,
                 arm=cfg.arm_client(),
-                sharc=cfg.station_bundle("sharc"),
-                asmi=cfg.station_bundle("asmi"),
+                sharc=sharc,
+                asmi=asmi,
                 results=results,
                 mock_mode=False,
                 mock_modes=mock_modes,
+                safety_checks=_safety_checks() if ASMI_SAFETY_CHECKS else None,
             )
         exit_code = 1 if failed else 0
     except Exception:  # noqa: BLE001 - keep the operator-facing export attempt
@@ -187,6 +213,14 @@ def _log_run_plan(experiment) -> None:
             asmi_kwargs.get("step_size", "<base protocol>"),
         )
     log.info("=" * 72)
+
+
+def _safety_checks() -> RunSafetyChecks:
+    return RunSafetyChecks(
+        confirm=confirm_yes,
+        asmi_position_check_well=ASMI_POSITION_CHECK_WELL,
+        asmi_position_check_height=ASMI_POSITION_CHECK_HEIGHT_MM,
+    )
 
 
 def _export_report(db_path: Path, experiment_id: str) -> None:

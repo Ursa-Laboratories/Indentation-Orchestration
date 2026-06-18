@@ -7,9 +7,13 @@ from polymer_indent.bioadhesives import (
     build_workflow_experiment,
     export_joined_well_csv,
     failed_health_names,
+    failed_validation_labels,
     format_health_report,
+    format_validation_report,
     run_health_checks,
+    validate_workflow_protocols,
 )
+from polymer_indent.loop import StationBundle
 from polymer_indent.results import ResultStore
 
 
@@ -56,6 +60,92 @@ def test_health_report_uses_checkmarks_and_names_failed_devices():
     assert "✅ SHARC station" in report
     assert "❌ ASMI station" in report
     assert failed_health_names(results) == ["ASMI station"]
+
+
+class _ValidationClient:
+    def __init__(self, *, valid=True):
+        self.valid = valid
+        self.protocols = []
+
+    def validate_protocol(self, protocol_yaml):
+        self.protocols.append(protocol_yaml)
+        if self.valid:
+            return {"valid": True, "steps": 2}
+        return {"valid": False, "error": "bad setup"}
+
+
+def test_validate_workflow_protocols_checks_position_and_per_well_protocols():
+    exp = build_workflow_experiment(
+        experiment_id="bio1",
+        wells=[WorkflowWell(target_well="B2", uv_exposure_s=7.0)],
+        shared_params={"uv_intensity": 1, "asmi_method_kwargs": {"force_limit": 3.0}},
+        final_return_location="storage_end",
+    )
+    sharc_client = _ValidationClient()
+    asmi_client = _ValidationClient()
+    sharc = StationBundle(
+        client=sharc_client,
+        base_protocol_yaml=(
+            "protocol:\n"
+            "  - measure:\n"
+            "      instrument: uv_curing\n"
+            "      position: plate_holder.plate.A1\n"
+            "      method: cure\n"
+            "      measurement_height: 1\n"
+        ),
+    )
+    asmi = StationBundle(
+        client=asmi_client,
+        base_protocol_yaml=(
+            "protocol:\n"
+            "  - measure:\n"
+            "      instrument: asmi\n"
+            "      position: plate.A1\n"
+            "      method: indentation\n"
+            "      measurement_height: 2\n"
+            "      indentation_limit_height: 1\n"
+        ),
+    )
+
+    results = validate_workflow_protocols(
+        exp,
+        sharc=sharc,
+        asmi=asmi,
+        include_asmi_position_check=True,
+    )
+
+    assert failed_validation_labels(results) == []
+    assert "✅ ASMI position check" in format_validation_report(results)
+    assert len(sharc_client.protocols) == 1
+    assert len(asmi_client.protocols) == 2
+    assert "position: plate.A1" in asmi_client.protocols[0]
+    assert "measurement_height: 10.0" in asmi_client.protocols[0]
+    assert "position: plate_holder.plate.B2" in sharc_client.protocols[0]
+    assert "exposure_time: 7.0" in sharc_client.protocols[0]
+    assert "position: plate.B2" in asmi_client.protocols[1]
+    assert "force_limit: 3.0" in asmi_client.protocols[1]
+
+
+def test_validate_workflow_protocols_reports_invalid_setup():
+    exp = build_workflow_experiment(
+        experiment_id="bio1",
+        wells=[WorkflowWell(target_well="A1")],
+        shared_params={},
+        final_return_location="storage_end",
+    )
+    sharc = StationBundle(
+        client=_ValidationClient(valid=False),
+        base_protocol_yaml="protocol:\n  - move:\n      instrument: uv_curing\n      position: plate_holder.plate.A1\n",
+    )
+    asmi = StationBundle(
+        client=_ValidationClient(),
+        base_protocol_yaml="protocol:\n  - move:\n      instrument: asmi\n      position: plate.A1\n",
+    )
+
+    results = validate_workflow_protocols(exp, sharc=sharc, asmi=asmi)
+
+    assert failed_validation_labels(results) == ["SHARC A1"]
+    assert "❌ SHARC A1" in format_validation_report(results)
 
 
 def test_export_joined_well_csv_includes_data_and_artifact_paths(tmp_path):

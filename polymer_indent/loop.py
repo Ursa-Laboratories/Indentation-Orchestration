@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import Iterable, Optional, Sequence
+from typing import Callable, Iterable, Optional, Sequence
 
 from .clients import ArmRailClient, CubOSStationClient, OpentronsClient
 from .experiment import Experiment
@@ -38,6 +38,16 @@ class StationBundle:
     base_protocol_yaml: str
 
 
+@dataclass(frozen=True)
+class RunSafetyChecks:
+    """Operator-confirmed safety stops for hardware-sensitive run segments."""
+
+    confirm: Callable[[str], bool]
+    asmi_position_check_well: str = "A1"
+    asmi_position_check_height: float = 10.0
+    asmi_slide_abort_return_location: str = "opentrons"
+
+
 def run_experiment(
     experiment: Experiment,
     *,
@@ -51,6 +61,7 @@ def run_experiment(
     resume: bool = False,
     only_wells: Optional[Sequence[str]] = None,
     continue_on_error: bool = False,
+    safety_checks: RunSafetyChecks | None = None,
 ) -> int:
     """Run the experiment. Returns the number of wells that failed.
 
@@ -115,12 +126,7 @@ def run_experiment(
 
             # 3. SHARC UV cure
             sharc_run_id = f"{step_id}:sharc"
-            sharc_yaml = _apply_protocol_param_overrides(
-                sharc.base_protocol_yaml,
-                params,
-                station="sharc",
-            )
-            sharc_protocol_yaml = render_protocol(sharc_yaml, well)
+            sharc_protocol_yaml = render_station_protocol(sharc, "sharc", well, params)
             _record_step(
                 results, run_id=sharc_run_id, experiment_id=experiment_id, well=well,
                 kind="sharc", station="sharc", protocol_yaml=sharc_protocol_yaml,
@@ -138,17 +144,50 @@ def run_experiment(
                           mock_mode=asmi_mock)
 
             # 4. arm: uv_station -> asmi
-            _transfer(arm, results, experiment_id, well, step_id, "move-to-asmi",
-                      "uv_station", "asmi", mock_mode=arm_mock)
+            if safety_checks:
+                _transfer(arm, results, experiment_id, well, step_id, "move-to-asmi-slide-out",
+                          "uv_station", "asmi_pre_push", mock_mode=arm_mock)
+                if not safety_checks.confirm(
+                    "Plate is at ASMI slide-out. Type 'yes' to push into ASMI; "
+                    "anything else returns the plate to Opentrons and aborts: "
+                ):
+                    _transfer(
+                        arm, results, experiment_id, well, step_id,
+                        "abort-asmi-slide-out-return",
+                        "asmi_pre_push",
+                        safety_checks.asmi_slide_abort_return_location,
+                        mock_mode=arm_mock,
+                        skip_safe_prelude=True,
+                    )
+                    raise RuntimeError("operator aborted before ASMI slide-in")
+                _transfer(arm, results, experiment_id, well, step_id, "move-to-asmi",
+                          "asmi_pre_push", "asmi", mock_mode=arm_mock,
+                          skip_safe_prelude=True)
+            else:
+                _transfer(arm, results, experiment_id, well, step_id, "move-to-asmi",
+                          "uv_station", "asmi", mock_mode=arm_mock)
+
+            if safety_checks:
+                _run_asmi_position_check(
+                    asmi,
+                    results,
+                    experiment_id=experiment_id,
+                    well=well,
+                    step_id=step_id,
+                    target_well=safety_checks.asmi_position_check_well,
+                    measurement_height=safety_checks.asmi_position_check_height,
+                    mock_mode=asmi_mock,
+                )
+                if not safety_checks.confirm(
+                    f"ASMI is positioned at {safety_checks.asmi_position_check_well} "
+                    f"+{safety_checks.asmi_position_check_height:g} mm. "
+                    "Type 'yes' to continue with indentation; anything else aborts: "
+                ):
+                    raise RuntimeError("operator aborted after ASMI position check")
 
             # 5. ASMI indentation
             asmi_run_id = f"{step_id}:asmi"
-            asmi_yaml = _apply_protocol_param_overrides(
-                asmi.base_protocol_yaml,
-                params,
-                station="asmi",
-            )
-            asmi_protocol_yaml = render_protocol(asmi_yaml, well)
+            asmi_protocol_yaml = render_station_protocol(asmi, "asmi", well, params)
             _record_step(
                 results, run_id=asmi_run_id, experiment_id=experiment_id, well=well,
                 kind="asmi", station="asmi", protocol_yaml=asmi_protocol_yaml,
@@ -273,6 +312,39 @@ def _apply_protocol_param_overrides(protocol_yaml: str, params: dict, *, station
     return apply_overrides(protocol_yaml, scalar=scalar, method_kwargs=method_kwargs)
 
 
+def render_station_protocol(
+    station_bundle: StationBundle,
+    station: str,
+    well: str,
+    params: dict,
+) -> str:
+    """Render the exact per-well SHARC/ASMI protocol used for execution."""
+    protocol_yaml = _apply_protocol_param_overrides(
+        station_bundle.base_protocol_yaml,
+        params,
+        station=station,
+    )
+    return render_protocol(protocol_yaml, well)
+
+
+def render_asmi_position_check_protocol(
+    *,
+    well: str = "A1",
+    measurement_height: float = 10.0,
+) -> str:
+    """A harmless ASMI force-read at a safe height for visual position checks."""
+    return (
+        "protocol:\n"
+        "  - measure:\n"
+        "      instrument: asmi\n"
+        f"      position: plate.{well.strip().upper()}\n"
+        "      method: measure\n"
+        f"      measurement_height: {float(measurement_height)!r}\n"
+        "      method_kwargs:\n"
+        "        n_samples: 1\n"
+    )
+
+
 def _collect_overrides(
     params: dict,
     *,
@@ -315,12 +387,48 @@ def _home_station(station: StationBundle, name: str, results, *,
     )
 
 
-def _transfer(arm, results, experiment_id, well, step_id, tag, src, dst, *, mock_mode=False) -> None:
+def _run_asmi_position_check(
+    station: StationBundle,
+    results,
+    *,
+    experiment_id: str,
+    well: str,
+    step_id: str,
+    target_well: str,
+    measurement_height: float,
+    mock_mode: bool,
+) -> None:
+    run_id = f"{step_id}:asmi-position-check"
+    protocol_yaml = render_asmi_position_check_protocol(
+        well=target_well,
+        measurement_height=measurement_height,
+    )
+    _record_step(
+        results, run_id=run_id, experiment_id=experiment_id, well=well,
+        kind="asmi_position_check", station="asmi", protocol_yaml=protocol_yaml,
+        call=lambda: station.client.run_protocol(
+            run_id=run_id,
+            protocol_yaml=protocol_yaml,
+            metadata={
+                "experiment_id": experiment_id,
+                "well": well,
+                "step": "asmi_position_check",
+                "target_well": target_well,
+                "measurement_height": measurement_height,
+            },
+            mock_mode=mock_mode,
+        ),
+    )
+
+
+def _transfer(arm, results, experiment_id, well, step_id, tag, src, dst, *,
+              mock_mode=False, skip_safe_prelude=False) -> None:
     run_id = f"{step_id}:{tag}"
     started = time.time()
     try:
         resp = arm.transfer(from_location=src, to_location=dst, run_id=run_id,
-                            mock_mode=True if mock_mode else None)
+                            mock_mode=True if mock_mode else None,
+                            skip_safe_prelude=skip_safe_prelude)
     except Exception as exc:
         results.record_run(
             run_id=run_id, experiment_id=experiment_id, well=well,
@@ -335,7 +443,12 @@ def _transfer(arm, results, experiment_id, well, step_id, tag, src, dst, *, mock
         kind="arm_transfer", station="xarm",
         success=_require_success(resp, "arm_transfer"),
         started_at=started, finished_at=time.time(),
-        result={"from": src, "to": dst, "response": resp},
+        result={
+            "from": src,
+            "to": dst,
+            "skip_safe_prelude": skip_safe_prelude,
+            "response": resp,
+        },
     )
 
 
@@ -352,4 +465,10 @@ def _select_wells(experiment: Experiment, only_wells: Optional[Sequence[str]]) -
             yield w
 
 
-__all__ = ["run_experiment", "StationBundle"]
+__all__ = [
+    "RunSafetyChecks",
+    "StationBundle",
+    "render_asmi_position_check_protocol",
+    "render_station_protocol",
+    "run_experiment",
+]

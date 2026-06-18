@@ -17,6 +17,11 @@ from typing import Any, Callable, Mapping, Sequence
 
 from .config import ControllerConfig
 from .experiment import Experiment
+from .loop import (
+    StationBundle,
+    render_asmi_position_check_protocol,
+    render_station_protocol,
+)
 
 _WELL_RE = re.compile(r"^[A-Za-z]+[0-9]+$")
 _NESTED_PARAM_KEYS = (
@@ -171,6 +176,59 @@ def failed_health_names(results: Sequence[HealthResult]) -> list[str]:
     return [result.name for result in results if not result.ok]
 
 
+@dataclass(frozen=True)
+class ProtocolValidationResult:
+    label: str
+    valid: bool
+    detail: str
+    payload: Mapping[str, Any] | None = None
+    error: str | None = None
+
+
+def validate_workflow_protocols(
+    experiment: Experiment,
+    *,
+    sharc: StationBundle,
+    asmi: StationBundle,
+    include_asmi_position_check: bool = False,
+    asmi_position_check_well: str = "A1",
+    asmi_position_check_height: float = 10.0,
+) -> list[ProtocolValidationResult]:
+    """Ask each station worker to run CubOS setup validation for run YAMLs."""
+    results: list[ProtocolValidationResult] = []
+    if include_asmi_position_check:
+        protocol_yaml = render_asmi_position_check_protocol(
+            well=asmi_position_check_well,
+            measurement_height=asmi_position_check_height,
+        )
+        results.append(_validate_protocol(asmi, "ASMI position check", protocol_yaml))
+    for well in experiment.wells:
+        params = experiment.well_params(well)
+        results.append(_validate_protocol(
+            sharc,
+            f"SHARC {well}",
+            render_station_protocol(sharc, "sharc", well, params),
+        ))
+        results.append(_validate_protocol(
+            asmi,
+            f"ASMI {well}",
+            render_station_protocol(asmi, "asmi", well, params),
+        ))
+    return results
+
+
+def format_validation_report(results: Sequence[ProtocolValidationResult]) -> str:
+    lines = ["CubOS setup validation:"]
+    for result in results:
+        mark = "✅" if result.valid else "❌"
+        lines.append(f"  {mark} {result.label:<20} {result.detail}")
+    return "\n".join(lines)
+
+
+def failed_validation_labels(results: Sequence[ProtocolValidationResult]) -> list[str]:
+    return [result.label for result in results if not result.valid]
+
+
 def prompt_ready(experiment: Experiment, *, input_fn: Callable[[str], str] = input) -> bool:
     print()
     print(f"Ready to run {experiment.id} on wells: {', '.join(experiment.wells)}")
@@ -179,6 +237,13 @@ def prompt_ready(experiment: Experiment, *, input_fn: Callable[[str], str] = inp
     except EOFError:
         return False
     return answer.strip().lower() == "ready"
+
+
+def confirm_yes(prompt: str, *, input_fn: Callable[[str], str] = input) -> bool:
+    try:
+        return input_fn(prompt).strip().lower() == "yes"
+    except EOFError:
+        return False
 
 
 EXPORT_COLUMNS = [
@@ -405,6 +470,33 @@ def _health_detail(payload: Mapping[str, Any]) -> str:
     return " ".join(pieces) or "reachable"
 
 
+def _validate_protocol(
+    station: StationBundle,
+    label: str,
+    protocol_yaml: str,
+) -> ProtocolValidationResult:
+    try:
+        payload = station.client.validate_protocol(protocol_yaml)
+    except Exception as exc:  # noqa: BLE001 - report every invalid/unreachable validation target
+        return ProtocolValidationResult(
+            label=label,
+            valid=False,
+            detail=f"validation request failed: {type(exc).__name__}: {exc}",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+    valid = bool(payload.get("valid"))
+    if valid:
+        detail = f"valid steps={payload.get('steps')}"
+    else:
+        detail = str(payload.get("error") or payload)
+    return ProtocolValidationResult(
+        label=label,
+        valid=valid,
+        detail=detail,
+        payload=payload,
+    )
+
+
 def _json_ready(value: Any) -> Any:
     return json.loads(json.dumps(value, default=str))
 
@@ -557,13 +649,18 @@ __all__ = [
     "EXPORT_COLUMNS",
     "HealthResult",
     "HealthTarget",
+    "ProtocolValidationResult",
     "WorkflowWell",
     "build_workflow_experiment",
+    "confirm_yes",
     "controller_health_targets",
     "export_joined_well_csv",
+    "failed_validation_labels",
     "failed_health_names",
     "format_health_report",
+    "format_validation_report",
     "load_joined_well_records",
     "prompt_ready",
     "run_health_checks",
+    "validate_workflow_protocols",
 ]

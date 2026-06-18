@@ -5,7 +5,7 @@ last-well routing, bookkeeping, resume, and failure handling.
 import pytest
 
 from polymer_indent.experiment import load_experiment
-from polymer_indent.loop import StationBundle, run_experiment
+from polymer_indent.loop import RunSafetyChecks, StationBundle, run_experiment
 from polymer_indent.results import ResultStore
 
 _SHARC_BASE = "protocol:\n  - home:\n  - measure:\n      instrument: uv_curing\n      position: plate_holder.plate.A1\n  - home:\n"
@@ -25,8 +25,8 @@ class FakeArm:
     def __init__(self):
         self.transfers = []
 
-    def transfer(self, *, from_location, to_location, run_id=None, mock_mode=None):
-        self.transfers.append((from_location, to_location, run_id, mock_mode))
+    def transfer(self, *, from_location, to_location, run_id=None, mock_mode=None, skip_safe_prelude=False):
+        self.transfers.append((from_location, to_location, run_id, mock_mode, skip_safe_prelude))
         return {"success": True, "from": from_location, "to": to_location}
 
 
@@ -162,6 +162,80 @@ def test_per_well_asmi_overrides_apply_to_protocol(tmp_path):
     assert "step_size: 0.02" in asmi_yamls["e1:A1:asmi"]
     assert "indentation_limit_height: -6.0" in asmi_yamls["e1:A2:asmi"]
     assert "force_limit: 6.0" in asmi_yamls["e1:A2:asmi"]
+
+
+def test_asmi_safety_checks_pause_slide_out_and_position_before_indent(tmp_path):
+    exp = _exp(tmp_path, wells=["A1"])
+    sharc, asmi = _bundles()
+    arm = FakeArm()
+    prompts = []
+
+    def confirm(prompt):
+        prompts.append(prompt)
+        return True
+
+    with ResultStore(tmp_path / "r.db") as results:
+        run_experiment(
+            exp, opentrons=FakeOpentrons(), arm=arm, sharc=sharc, asmi=asmi,
+            results=results, mock_mode=True,
+            safety_checks=RunSafetyChecks(confirm=confirm),
+        )
+
+    assert prompts == [
+        "Plate is at ASMI slide-out. Type 'yes' to push into ASMI; "
+        "anything else returns the plate to Opentrons and aborts: ",
+        "ASMI is positioned at A1 +10 mm. "
+        "Type 'yes' to continue with indentation; anything else aborts: ",
+    ]
+    assert arm.transfers[1][:2] == ("uv_station", "asmi_pre_push")
+    assert arm.transfers[2][:2] == ("asmi_pre_push", "asmi")
+    assert arm.transfers[2][4] is True
+    run_ids = [run_id for run_id, *_ in asmi.client.runs]
+    assert run_ids == ["e1:A1:home-asmi", "e1:A1:asmi-position-check", "e1:A1:asmi"]
+    position_check = next(p for rid, p, *_ in asmi.client.runs
+                          if rid == "e1:A1:asmi-position-check")
+    assert "position: plate.A1" in position_check
+    assert "method: measure" in position_check
+    assert "measurement_height: 10.0" in position_check
+    assert "indentation_limit_height" not in position_check
+
+
+def test_asmi_slide_out_reject_returns_to_opentrons_and_aborts(tmp_path):
+    exp = _exp(tmp_path, wells=["A1"])
+    sharc, asmi = _bundles()
+    arm = FakeArm()
+
+    with ResultStore(tmp_path / "r.db") as results:
+        with pytest.raises(RuntimeError, match="operator aborted before ASMI slide-in"):
+            run_experiment(
+                exp, opentrons=FakeOpentrons(), arm=arm, sharc=sharc, asmi=asmi,
+                results=results, mock_mode=True,
+                safety_checks=RunSafetyChecks(confirm=lambda _prompt: False),
+            )
+
+    assert arm.transfers[1][:2] == ("uv_station", "asmi_pre_push")
+    assert arm.transfers[2][:2] == ("asmi_pre_push", "opentrons")
+    assert arm.transfers[2][4] is True
+    assert [run_id for run_id, *_ in asmi.client.runs] == ["e1:A1:home-asmi"]
+
+
+def test_asmi_position_check_reject_aborts_before_indent(tmp_path):
+    exp = _exp(tmp_path, wells=["A1"])
+    sharc, asmi = _bundles()
+    answers = iter([True, False])
+
+    with ResultStore(tmp_path / "r.db") as results:
+        with pytest.raises(RuntimeError, match="operator aborted after ASMI position check"):
+            run_experiment(
+                exp, opentrons=FakeOpentrons(), arm=FakeArm(), sharc=sharc, asmi=asmi,
+                results=results, mock_mode=True,
+                safety_checks=RunSafetyChecks(confirm=lambda _prompt: next(answers)),
+            )
+
+    assert [run_id for run_id, *_ in asmi.client.runs] == [
+        "e1:A1:home-asmi",
+        "e1:A1:asmi-position-check",
+    ]
 
 
 def test_mock_mode_propagates_to_stations(tmp_path):
