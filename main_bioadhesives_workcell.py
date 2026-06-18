@@ -1,51 +1,11 @@
 #!/usr/bin/env python3
-"""
-Bioadhesives full workcell loop.
+"""Bioadhesives full workcell loop.
 
-For each ``(source_tube, target_well)`` transfer in ``TRANSFERS``:
-
-    Opentrons source tube -> plate well
-    arm: Opentrons -> UV curing station
-    SHARC UV cure for that same well
-    arm: UV curing station -> ASMI
-    ASMI indentation for that same well
-    arm: ASMI -> Opentrons, except the final well returns to FINAL_RETURN_LOCATION
-
-Edit the SETTINGS block below and run:
-    python main_bioadhesives_workcell.py
-
-How this script fits into the workcell stack
---------------------------------------------
-This file is pure configuration + glue. The actual per-well orchestration
-lives in ``polymer_indent.loop.run_experiment``, which calls (per well, in
-order):
-
-  1.  ``OpentronsClient.run_fill``  — generates a fresh one-transfer Flex
-                                      protocol from the SETTINGS below and
-                                      ships it to the Opentrons HTTP API.
-  2a. ``CubOSStationClient.run_protocol`` on SHARC — home-only protocol so
-                                      the gantry is parked before the arm
-                                      deposits the plate.
-  2.  ``ArmRailClient.transfer``    — opentrons -> uv_station.
-  3.  ``CubOSStationClient.run_protocol`` on SHARC — UV cure YAML built by
-                                      ``apply_overrides`` + ``render_protocol``
-                                      (well id and per-transfer
-                                      ``exposure_time`` swapped per iteration).
-  4a. ``CubOSStationClient.run_protocol`` on ASMI  — home-only protocol so
-                                      the ASMI gantry is parked before the arm
-                                      deposits the plate.
-  4.  ``ArmRailClient.transfer``    — uv_station -> asmi.
-  5.  ``CubOSStationClient.run_protocol`` on ASMI  — indentation YAML built
-                                      the same way as SHARC.
-  6.  ``ArmRailClient.transfer``    — asmi -> opentrons (or, on the last
-                                      well, to ``FINAL_RETURN_LOCATION``).
-
-The arm worker has a fixed route table keyed on the location names above
-(``opentrons``, ``uv_station``, ``asmi``, ``storage_end``, ``storage_start``);
-the ``*_SLOT`` settings here pick the Opentrons deck slots used by the
-generated dispense protocol and must agree with the arm worker's
-opentrons-side pickup point. SHARC/ASMI tunables ride on the cubos
-protocol YAML via ``apply_overrides``.
+Operator flow:
+  1. Health-check every machine used by this run.
+  2. Prompt for readiness only if all required machines are reachable.
+  3. Execute Opentrons -> SHARC cure -> ASMI indentation for each configured well.
+  4. Export one joined CSV row per well from the SQLite result store.
 """
 
 from __future__ import annotations
@@ -54,72 +14,76 @@ import logging
 import sys
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(REPO_ROOT))
+
+from polymer_indent.bioadhesives import (  # noqa: E402
+    WorkflowWell,
+    build_workflow_experiment,
+    controller_health_targets,
+    export_joined_well_csv,
+    failed_health_names,
+    format_health_report,
+    prompt_ready,
+    run_health_checks,
+)
+from polymer_indent.clients import OpentronsClient  # noqa: E402
+from polymer_indent.config import load_controller_config  # noqa: E402
+from polymer_indent.loop import run_experiment  # noqa: E402
+
 # =============================================================================
-# SETTINGS — edit these
+# SETTINGS - edit these
 # =============================================================================
 EXPERIMENT_ID = "bioadhesives_pilot_full_loop"
 CONTROLLER_CONFIG = "configs/controller.yaml"
 
-# Per-well transfers: (source_tube_well, target_plate_well, uv_exposure_s).
-# Tube rack wells available: A1, B1, A2, B2, A3, B3.
-# TRANSFERS = [
-#     ("A1", "A1", 1.0),
-#     ("A1", "A2", 2.0),
-#     ("A1", "A3", 3.0),
-#     ("B1", "B1", 1.0),
-#     ("B1", "B2", 2.0),
-#     ("B1", "B3", 3.0),
-# ]
+# Each entry is one complete workflow run for a target plate well.
+# Per-well SHARC/ASMI settings override the shared defaults below.
+WORKFLOW_WELLS = [
+    WorkflowWell(
+        target_well="A1",
+        source_well="A1",
+        uv_exposure_s=11.0,
+        # Examples for per-well indentation customization:
+        # asmi_scalar={"indentation_limit_height": -4.0},
+        # asmi_method_kwargs={"force_limit": 4.0, "step_size": 0.02},
+    ),
+]
 
-TRANSFERS = [
-    ("A1", "A1", 11.0)
-    ]
-
-# Opentrons deck slots — must match the arm worker's opentrons pickup point.
+# Opentrons deck slots - must match the arm worker's Opentrons pickup point.
 OPENTRONS_TIP_RACK_SLOT = "A2"
 OPENTRONS_TUBE_RACK_SLOT = "B2"
 OPENTRONS_PLATE_SLOT = "D1"
-
-# Opentrons plate labware. Must be a load_name in the Flex labware library.
-# SHARC and ASMI specify their plate in their respective deck.yaml; this SETTING
-# is the Opentrons-side equivalent.
 OPENTRONS_PLATE_LABWARE = "corning_96_wellplate_360ul_flat"
 
-# Opentrons viscous transfer settings
+# Opentrons viscous transfer defaults.
 OPENTRONS_VOLUME_UL = 100
 OPENTRONS_FLOW_RATE_UL_MIN = 150
 OPENTRONS_AIR_EXPULSION_UL = 20
 OPENTRONS_TIP_LIFT_HEIGHT_MM = 8
 
-# UV cure (SHARC station). Per-transfer exposure_time lives in TRANSFERS above.
+# SHARC UV cure defaults. Per-well exposure comes from WORKFLOW_WELLS.
 UV_INTENSITY = 1
 
-# ASMI indentation
+# ASMI indentation defaults. Per-well overrides go in WorkflowWell(...).
 ASMI_INDENT_LIMIT_HEIGHT = 1.5
-ASMI_MEASURE_WITH_RETURN = True   # record up-sweep samples in addition to descent
+ASMI_MEASURE_WITH_RETURN = True
 
 # Where the plate goes after the final ASMI run.
 FINAL_RETURN_LOCATION = "storage_end"
 
-# Set True to skip the Opentrons dispense — the OpentronsClient placeholder
-# (no base_url) logs a warning and returns success, so arm + SHARC + ASMI run
-# end-to-end while the result store still gets an "opentrons_fill" row.
+# True means the Opentrons fill row is a logged placeholder and Flex health is
+# not required. False means the real Flex must pass health before the run starts.
 SKIP_OPENTRONS_FILL = True
 
-# Set True to dry-run JUST the arm movements (no UV cure, no indentation, no
-# Pi gantry homing). SHARC + ASMI /run-protocol calls go through with
-# mock_mode=True; the arm still moves for real.
+# True means SHARC + ASMI /run-protocol calls use cubos mock_mode. Workers must
+# still be reachable; arm + rail still move for real unless the arm worker itself
+# was launched with --mock.
 MOCK_STATIONS = False
+
+# Joined per-well export written after a run attempt.
+REPORT_CSV = REPO_ROOT / "results" / f"{EXPERIMENT_ID}_joined.csv"
 # =============================================================================
-
-
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from polymer_indent.clients import OpentronsClient  # noqa: E402
-from polymer_indent.config import load_controller_config  # noqa: E402
-from polymer_indent.experiment import Experiment  # noqa: E402
-from polymer_indent.loop import run_experiment  # noqa: E402
-from polymer_indent.protocol_render import apply_overrides  # noqa: E402
 
 
 logging.basicConfig(
@@ -131,8 +95,57 @@ log = logging.getLogger("polymer_indent.bioadhesives")
 
 def main() -> int:
     cfg = load_controller_config(CONTROLLER_CONFIG)
+    experiment = _build_experiment()
 
-    shared = {
+    include_opentrons = not SKIP_OPENTRONS_FILL
+    health_results = run_health_checks(
+        controller_health_targets(cfg, include_opentrons=include_opentrons)
+    )
+    print(format_health_report(health_results))
+    if SKIP_OPENTRONS_FILL:
+        print("  Opentrons Flex skipped because SKIP_OPENTRONS_FILL=True")
+    offline = failed_health_names(health_results)
+    if offline:
+        print(f"Aborting: offline or unready device(s): {', '.join(offline)}", file=sys.stderr)
+        return 1
+
+    _log_run_plan(experiment)
+    if not prompt_ready(experiment):
+        print("Aborted before starting hardware workflow.")
+        return 130
+
+    opentrons = OpentronsClient(None) if SKIP_OPENTRONS_FILL else cfg.opentrons_client()
+    if SKIP_OPENTRONS_FILL:
+        log.warning("SKIP_OPENTRONS_FILL=True - Opentrons step will be a no-op placeholder")
+
+    mock_modes = {"sharc": True, "asmi": True} if MOCK_STATIONS else None
+    if MOCK_STATIONS:
+        log.warning("MOCK_STATIONS=True - SHARC + ASMI protocols run in cubos mock_mode")
+
+    exit_code = 0
+    try:
+        with cfg.result_store() as results:
+            failed = run_experiment(
+                experiment,
+                opentrons=opentrons,
+                arm=cfg.arm_client(),
+                sharc=cfg.station_bundle("sharc"),
+                asmi=cfg.station_bundle("asmi"),
+                results=results,
+                mock_mode=False,
+                mock_modes=mock_modes,
+            )
+        exit_code = 1 if failed else 0
+    except Exception:  # noqa: BLE001 - keep the operator-facing export attempt
+        log.exception("bioadhesives workflow failed")
+        exit_code = 1
+    finally:
+        _export_report(cfg.db_path, experiment.id)
+    return exit_code
+
+
+def _build_experiment():
+    shared_params = {
         "volume_ul": OPENTRONS_VOLUME_UL,
         "flow_rate_ul_min": OPENTRONS_FLOW_RATE_UL_MIN,
         "air_expulsion_ul": OPENTRONS_AIR_EXPULSION_UL,
@@ -142,62 +155,47 @@ def main() -> int:
         "plate_slot": OPENTRONS_PLATE_SLOT,
         "plate_labware": OPENTRONS_PLATE_LABWARE,
         "uv_intensity": UV_INTENSITY,
-        "asmi_indentation_limit_height": ASMI_INDENT_LIMIT_HEIGHT,
-    }
-    experiment = Experiment(
-        id=EXPERIMENT_ID,
-        wells=[target for _, target, _ in TRANSFERS],
-        params={
-            target: {**shared, "source_well": source, "formulation": source,
-                     "uv_exposure_s": uv_exposure_s}
-            for source, target, uv_exposure_s in TRANSFERS
+        "asmi_scalar": {
+            "indentation_limit_height": ASMI_INDENT_LIMIT_HEIGHT,
         },
-        defaults={},
-        final_well_return_location=FINAL_RETURN_LOCATION,
-        raw={"opentrons_transfers": TRANSFERS},
+        "asmi_method_kwargs": {
+            "measure_with_return": ASMI_MEASURE_WITH_RETURN,
+        },
+    }
+    return build_workflow_experiment(
+        experiment_id=EXPERIMENT_ID,
+        wells=WORKFLOW_WELLS,
+        shared_params=shared_params,
+        final_return_location=FINAL_RETURN_LOCATION,
     )
 
-    sharc = cfg.station_bundle("sharc")
-    # Only intensity is global; exposure_time is overridden per-well from
-    # params["uv_exposure_s"] inside _run_one_well.
-    sharc.base_protocol_yaml = apply_overrides(
-        sharc.base_protocol_yaml,
-        method_kwargs={"intensity": UV_INTENSITY},
-    )
-    asmi = cfg.station_bundle("asmi")
-    asmi.base_protocol_yaml = apply_overrides(
-        asmi.base_protocol_yaml,
-        scalar={"indentation_limit_height": ASMI_INDENT_LIMIT_HEIGHT},
-        method_kwargs={"measure_with_return": ASMI_MEASURE_WITH_RETURN},
-    )
 
+def _log_run_plan(experiment) -> None:
     log.info("=" * 72)
-    log.info("bioadhesives full loop: %d transfers", len(TRANSFERS))
-    for source, target, uv_s in TRANSFERS:
-        log.info("  Opentrons %s -> plate %s, UV %.1fs, then ASMI %s",
-                 source, target, uv_s, target)
-    log.info("=" * 72)
-
-    opentrons = OpentronsClient(None) if SKIP_OPENTRONS_FILL else cfg.opentrons_client()
-    if SKIP_OPENTRONS_FILL:
-        log.warning("SKIP_OPENTRONS_FILL=True — Opentrons step will be a no-op placeholder")
-
-    mock_modes = {"sharc": True, "asmi": True} if MOCK_STATIONS else None
-    if MOCK_STATIONS:
-        log.warning("MOCK_STATIONS=True — SHARC + ASMI protocols run in mock_mode (no UV, no indent, no Pi-side gantry motion)")
-
-    with cfg.result_store() as results:
-        failed = run_experiment(
-            experiment,
-            opentrons=opentrons,
-            arm=cfg.arm_client(),
-            sharc=sharc,
-            asmi=asmi,
-            results=results,
-            mock_mode=False,
-            mock_modes=mock_modes,
+    log.info("bioadhesives full loop: %d workflow well(s)", len(experiment.wells))
+    for well, params in experiment.items():
+        asmi_scalar = params.get("asmi_scalar") or {}
+        asmi_kwargs = params.get("asmi_method_kwargs") or {}
+        log.info(
+            "  source %s -> plate %s | UV %ss @ intensity %s | ASMI limit=%s force=%s step=%s",
+            params.get("source_well"),
+            well,
+            params.get("uv_exposure_s"),
+            params.get("uv_intensity"),
+            asmi_scalar.get("indentation_limit_height"),
+            asmi_kwargs.get("force_limit", "<base protocol>"),
+            asmi_kwargs.get("step_size", "<base protocol>"),
         )
-    return 1 if failed else 0
+    log.info("=" * 72)
+
+
+def _export_report(db_path: Path, experiment_id: str) -> None:
+    try:
+        out = export_joined_well_csv(db_path, experiment_id, REPORT_CSV)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("could not export joined workflow CSV: %s", exc)
+        return
+    log.info("joined workflow CSV: %s", out)
 
 
 if __name__ == "__main__":

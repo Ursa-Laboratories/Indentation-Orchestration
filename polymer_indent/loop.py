@@ -115,12 +115,11 @@ def run_experiment(
 
             # 3. SHARC UV cure
             sharc_run_id = f"{step_id}:sharc"
-            sharc_yaml = sharc.base_protocol_yaml
-            if "uv_exposure_s" in params:
-                sharc_yaml = apply_overrides(
-                    sharc_yaml,
-                    method_kwargs={"exposure_time": params["uv_exposure_s"]},
-                )
+            sharc_yaml = _apply_protocol_param_overrides(
+                sharc.base_protocol_yaml,
+                params,
+                station="sharc",
+            )
             sharc_protocol_yaml = render_protocol(sharc_yaml, well)
             _record_step(
                 results, run_id=sharc_run_id, experiment_id=experiment_id, well=well,
@@ -144,7 +143,12 @@ def run_experiment(
 
             # 5. ASMI indentation
             asmi_run_id = f"{step_id}:asmi"
-            asmi_protocol_yaml = render_protocol(asmi.base_protocol_yaml, well)
+            asmi_yaml = _apply_protocol_param_overrides(
+                asmi.base_protocol_yaml,
+                params,
+                station="asmi",
+            )
+            asmi_protocol_yaml = render_protocol(asmi_yaml, well)
             _record_step(
                 results, run_id=asmi_run_id, experiment_id=experiment_id, well=well,
                 kind="asmi", station="asmi", protocol_yaml=asmi_protocol_yaml,
@@ -210,6 +214,89 @@ def _record_step(results, *, run_id, experiment_id, well, kind, station, call,
 
 
 _HOME_ONLY_PROTOCOL_YAML = "protocol:\n  - home:\n"
+
+_SHARC_SCALAR_PARAMS = {
+    "sharc_measurement_height": "measurement_height",
+    "uv_measurement_height": "measurement_height",
+}
+_SHARC_METHOD_PARAMS = {
+    "sharc_intensity": "intensity",
+    "uv_intensity": "intensity",
+    "sharc_exposure_time": "exposure_time",
+    "uv_exposure_s": "exposure_time",
+    "uv_exposure_time_s": "exposure_time",
+}
+_ASMI_SCALAR_PARAMS = {
+    "asmi_measurement_height": "measurement_height",
+    "asmi_indentation_limit_height": "indentation_limit_height",
+    "asmi_interwell_scan_height": "interwell_scan_height",
+    "measurement_height": "measurement_height",
+    "indentation_limit_height": "indentation_limit_height",
+    "interwell_scan_height": "interwell_scan_height",
+}
+_ASMI_METHOD_PARAMS = {
+    "asmi_step_size": "step_size",
+    "asmi_force_limit": "force_limit",
+    "asmi_baseline_samples": "baseline_samples",
+    "asmi_measure_with_return": "measure_with_return",
+    "step_size": "step_size",
+    "force_limit": "force_limit",
+    "baseline_samples": "baseline_samples",
+    "measure_with_return": "measure_with_return",
+}
+
+
+def _apply_protocol_param_overrides(protocol_yaml: str, params: dict, *, station: str) -> str:
+    """Apply per-well station overrides from ``Experiment.params``.
+
+    The direct keys are intentionally friendly for script authors
+    (``uv_exposure_s``, ``asmi_force_limit``). The nested
+    ``{station}_scalar`` and ``{station}_method_kwargs`` mappings are the escape
+    hatch for any CubOS protocol field that does not deserve a new top-level key.
+    """
+    if station == "sharc":
+        scalar, method_kwargs = _collect_overrides(
+            params,
+            station="sharc",
+            scalar_params=_SHARC_SCALAR_PARAMS,
+            method_params=_SHARC_METHOD_PARAMS,
+        )
+    elif station == "asmi":
+        scalar, method_kwargs = _collect_overrides(
+            params,
+            station="asmi",
+            scalar_params=_ASMI_SCALAR_PARAMS,
+            method_params=_ASMI_METHOD_PARAMS,
+        )
+    else:
+        raise ValueError(f"unknown station {station!r}")
+    return apply_overrides(protocol_yaml, scalar=scalar, method_kwargs=method_kwargs)
+
+
+def _collect_overrides(
+    params: dict,
+    *,
+    station: str,
+    scalar_params: dict[str, str],
+    method_params: dict[str, str],
+) -> tuple[dict, dict]:
+    scalar = _mapping_param(params.get(f"{station}_scalar"))
+    method_kwargs = _mapping_param(params.get(f"{station}_method_kwargs"))
+    for source_key, protocol_key in scalar_params.items():
+        if source_key in params and params[source_key] is not None:
+            scalar[protocol_key] = params[source_key]
+    for source_key, protocol_key in method_params.items():
+        if source_key in params and params[source_key] is not None:
+            method_kwargs[protocol_key] = params[source_key]
+    return scalar, method_kwargs
+
+
+def _mapping_param(value) -> dict:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise TypeError(f"protocol override must be a mapping, got {type(value).__name__}")
+    return dict(value)
 
 
 def _home_station(station: StationBundle, name: str, results, *,

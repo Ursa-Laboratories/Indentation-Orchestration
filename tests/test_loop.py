@@ -145,6 +145,25 @@ def test_per_well_uv_exposure_overrides_sharc_yaml(tmp_path):
     assert "exposure_time" not in home_yaml
 
 
+def test_per_well_asmi_overrides_apply_to_protocol(tmp_path):
+    exp = _exp(tmp_path, wells=["A1", "A2"])
+    exp.params["A1"]["asmi_scalar"] = {"indentation_limit_height": -4.0}
+    exp.params["A1"]["asmi_method_kwargs"] = {"force_limit": 4.0, "step_size": 0.02}
+    exp.params["A2"]["asmi_indentation_limit_height"] = -6.0
+    exp.params["A2"]["asmi_force_limit"] = 6.0
+    sharc, asmi = _bundles()
+    with ResultStore(tmp_path / "r.db") as results:
+        run_experiment(exp, opentrons=FakeOpentrons(), arm=FakeArm(),
+                       sharc=sharc, asmi=asmi, results=results, mock_mode=True)
+
+    asmi_yamls = {rid: p for rid, p, *_ in asmi.client.runs if rid.endswith(":asmi")}
+    assert "indentation_limit_height: -4.0" in asmi_yamls["e1:A1:asmi"]
+    assert "force_limit: 4.0" in asmi_yamls["e1:A1:asmi"]
+    assert "step_size: 0.02" in asmi_yamls["e1:A1:asmi"]
+    assert "indentation_limit_height: -6.0" in asmi_yamls["e1:A2:asmi"]
+    assert "force_limit: 6.0" in asmi_yamls["e1:A2:asmi"]
+
+
 def test_mock_mode_propagates_to_stations(tmp_path):
     exp = _exp(tmp_path, wells=["A1"])
     sharc, asmi = _bundles()
